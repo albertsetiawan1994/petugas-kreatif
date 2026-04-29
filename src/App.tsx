@@ -7,6 +7,7 @@ import { UnavailableManager } from './components/UnavailableManager';
 import { InspirationManager } from './components/InspirationManager';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { AdminUserManager } from './components/AdminUserManager';
+import { FotoManager } from './components/FotoManager';
 import { dbService } from './services/db';
 import { format } from 'date-fns';
 import { Download, Upload, AlertTriangle, Aperture, Smartphone, CheckCircle, Info, LogOut, LogIn, Loader2 } from 'lucide-react';
@@ -16,12 +17,23 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertType, showAlert } from './services/alertService';
-import { ADMIN_EMAILS, logActivity, loginWithGoogle, logoutFirebase, watchAuthState, watchAdmins } from './services/firebase';
+import { consumeRedirectLoginResult, logActivity, loginWithGoogle, logoutFirebase, watchAuthState } from './services/firebase';
 import { initializeNativeDownloadNotifications } from './services/nativeDownloadNotifications';
 
-import { CombinedScheduleRow, Volunteer } from './types';
+import { AppPageKey, CombinedScheduleRow, UserRoleDefinition, Volunteer } from './types';
 
 function App() {
+  const isAuthRequiredError = (error: unknown) =>
+    error instanceof Error && error.message === 'AUTH_REQUIRED';
+  const toAuthMessage = (code: string) => {
+    if (code.includes('popup-closed-by-user')) return 'Login dibatalkan.';
+    if (code.includes('popup-blocked')) return 'Popup login diblokir browser. Izinkan popup lalu coba lagi.';
+    if (code.includes('unauthorized-domain')) return 'Domain aplikasi belum diizinkan di Firebase Auth (Authorized domains).';
+    if (code.includes('network-request-failed')) return 'Login gagal karena koneksi internet bermasalah. Coba lagi.';
+    if (code.includes('account-exists-with-different-credential')) return 'Akun sudah terdaftar dengan metode login lain.';
+    return `Gagal login Google (${code || 'unknown'}). Periksa konfigurasi Firebase Auth.`;
+  };
+
   // Initialize tab from localStorage or default to 'home'
   const [currentTab, setCurrentTab] = useState(() => localStorage.getItem('activeTab') || 'home');
   const [loading, setLoading] = useState(false);
@@ -33,8 +45,14 @@ function App() {
   const [alertData, setAlertData] = useState<{message: string, type: AlertType} | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('isLoggedIn') === 'true');
-  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('isAdmin') === 'true');
-  const [userEmail, setUserEmail] = useState('');
+  const [activeRole, setActiveRole] = useState<UserRoleDefinition | null>(null);
+  const [pageAccess, setPageAccess] = useState<Record<AppPageKey, boolean>>({
+    home: false,
+    calendar: false,
+    inspiration: false,
+    volunteers: false,
+    foto: false
+  });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   
@@ -56,29 +74,54 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    let adminUnsubscribe: (() => void) | null = null;
-    
+    void (async () => {
+      const redirectErrorCode = await consumeRedirectLoginResult();
+      if (redirectErrorCode) {
+        setAuthError(toAuthMessage(redirectErrorCode));
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    let unsubscribeRoleAndAccess: (() => void) | undefined;
+
     const authUnsubscribe = watchAuthState((user) => {
       const isAuth = !!user;
       setIsAuthenticated(isAuth);
       localStorage.setItem('isLoggedIn', isAuth ? 'true' : 'false');
 
       const email = (user?.email || '').toLowerCase();
-      setUserEmail(email);
-      
-      // Cleanup previous admin listener if any
-      if (adminUnsubscribe) adminUnsubscribe();
-      
-      if (isAuth) {
-        adminUnsubscribe = watchAdmins((adminEmails) => {
-          const isUserAdmin = adminEmails.includes(email);
-          setIsAdmin(isUserAdmin);
-          localStorage.setItem('isAdmin', isUserAdmin ? 'true' : 'false');
+
+      // Cleanup previous subscription if it exists
+      if (unsubscribeRoleAndAccess) {
+        unsubscribeRoleAndAccess();
+        unsubscribeRoleAndAccess = undefined;
+      }
+
+      if (isAuth && email) {
+        dbService
+          .upsertRegisteredUser({
+            email,
+            source: 'google_login',
+          })
+          .catch((e) => console.warn('Failed to register signed-in user', e));
+        
+        // Subscribe to real-time updates for user role and access
+        unsubscribeRoleAndAccess = dbService.subscribeUserRoleAndAccessRealtime(email, (navAccess, roleDef) => {
+          setPageAccess(navAccess);
+          setActiveRole(roleDef);
         });
-        logActivity('APP_LOAD');
+        
+        logActivity('APP_LOAD', { email });
       } else {
-        setIsAdmin(false);
-        localStorage.removeItem('isAdmin');
+        setPageAccess({
+          home: false,
+          calendar: false,
+          inspiration: false,
+          volunteers: false,
+          foto: false
+        });
+        setActiveRole(null);
       }
       
       setAuthReady(true);
@@ -86,7 +129,9 @@ function App() {
 
     return () => {
       authUnsubscribe();
-      if (adminUnsubscribe) adminUnsubscribe();
+      if (unsubscribeRoleAndAccess) {
+        unsubscribeRoleAndAccess();
+      }
     };
   }, []);
 
@@ -253,7 +298,9 @@ function App() {
         void fetchMonthData(d, { forceRefresh: false, preferLocal: true, writeToLocal: true });
       }
     } catch (e) {
-      console.error("Failed to load global data", e);
+      if (!isAuthRequiredError(e)) {
+        console.error("Failed to load global data", e);
+      }
     } finally {
       // If we started the indicator in this run, always stop it.
       if (startedIndicator) {
@@ -274,9 +321,10 @@ function App() {
   };
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated) return;
     if (isAuthenticated) {
       // On first open after auth, prefetch +/-6 months so switching months is instant.
-      if (!prefetchStartedRef.current && authReady) {
+      if (!prefetchStartedRef.current) {
         prefetchStartedRef.current = true;
         void (async () => {
           try {
@@ -335,14 +383,24 @@ function App() {
   }, [isAuthenticated, authReady, currentMonth]);
 
   useEffect(() => {
-    if (currentTab === 'settings') {
-      setCurrentTab(isAdmin ? 'volunteers' : 'home');
+    const orderedTabs: AppPageKey[] = ['home', 'calendar', 'inspiration', 'volunteers', 'foto'];
+    const firstAllowed = orderedTabs.find((tab) => pageAccess[tab]);
+
+    if (!firstAllowed) {
+      if (currentTab !== 'home') {
+        setCurrentTab('home');
+      }
       return;
     }
-    if (!isAdmin && currentTab !== 'home' && currentTab !== 'inspiration' && currentTab !== 'calendar') {
-      setCurrentTab('home');
+
+    if (currentTab === 'settings') {
+      setCurrentTab(firstAllowed);
+      return;
     }
-  }, [isAdmin, currentTab]);
+    if (pageAccess[currentTab as AppPageKey] === false) {
+      setCurrentTab(firstAllowed);
+    }
+  }, [pageAccess, currentTab]);
 
   // Save tab to localStorage whenever it changes
   useEffect(() => {
@@ -352,9 +410,7 @@ function App() {
   // Listen for PWA install event
   useEffect(() => {
     const handler = (e: any) => {
-      // Prevent the mini-infobar from appearing on mobile
-      e.preventDefault();
-      // Stash the event so it can be triggered later.
+      // Stash the event when available.
       setInstallPrompt(e);
     };
 
@@ -392,13 +448,7 @@ function App() {
       await loginWithGoogle();
     } catch (error: any) {
       const code = error?.code || '';
-      if (code.includes('popup-closed-by-user')) {
-        setAuthError('Login dibatalkan.');
-      } else if (code.includes('popup-blocked')) {
-        setAuthError('Popup login diblokir browser. Izinkan popup lalu coba lagi.');
-      } else {
-        setAuthError('Gagal login Google. Periksa konfigurasi Firebase Auth.');
-      }
+      setAuthError(toAuthMessage(code));
     } finally {
       setAuthLoading(false);
     }
@@ -407,7 +457,6 @@ function App() {
   const handleLogout = async () => {
     await logoutFirebase();
     localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('isAdmin');
     setCurrentTab('home');
   };
 
@@ -508,20 +557,76 @@ function App() {
 
   const renderContent = () => {
     const key = `${currentTab}-${dataVersion}`;
+    const hasAction = (page: AppPageKey, action: string) =>
+      !!activeRole?.pages?.[page]?.enabled && !!activeRole?.pages?.[page]?.actions?.[action];
+
+    const canJadwalScreenshot = hasAction('home', 'screenshot');
+    const canJadwalGenerate = hasAction('home', 'generate_petugas');
+    const canJadwalManualAssign = hasAction('home', 'manual_assign');
+
+    const canCalendarViewAdd = hasAction('calendar', 'view_tambah_jadwal');
+    const canCalendarEdit = hasAction('calendar', 'edit_jadwal');
+    const canCalendarDelete = hasAction('calendar', 'delete_jadwal');
+    const canCalendarSave = hasAction('calendar', 'simpan_jadwal');
+
+    const canInspirationVerse = hasAction('inspiration', 'view_ayat_alkitab');
+    const canInspirationSong = hasAction('inspiration', 'view_puji_syukur');
+    const canInspirationLiturgy = hasAction('inspiration', 'view_ibadat_harian');
+    const canInspirationPrayer = hasAction('inspiration', 'cari_doa');
+    const canInspirationAi = hasAction('inspiration', 'ide_kreatif_ai');
+
+    const canViewPetugas = hasAction('volunteers', 'view_petugas');
+    const canAddPetugas = hasAction('volunteers', 'tambah_petugas');
+    const canEditPetugas = hasAction('volunteers', 'edit_petugas');
+    const canDeletePetugas = hasAction('volunteers', 'delete_petugas');
+
+    const canViewFoto = hasAction('foto', 'view_foto');
+    const canUploadFoto = hasAction('foto', 'upload_foto');
+    const canDeleteFoto = hasAction('foto', 'delete_foto');
+
     return (
       <div className="px-3 sm:px-4 md:px-6">
         {/* Keep Jadwal & Kalender mounted for instant tab switches */}
         <div className={currentTab === 'home' ? 'block' : 'hidden'}>
-          <ScheduleDashboard isFetchingData={showFetchingMonth} readOnly={!isAdmin} volunteers={volunteers} scheduleRows={scheduleRows} reloadData={reloadData} currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} />
+          <ScheduleDashboard
+            isFetchingData={showFetchingMonth}
+            readOnly={!canJadwalManualAssign}
+            canScreenshot={canJadwalScreenshot}
+            canGenerate={canJadwalGenerate}
+            canManualAssign={canJadwalManualAssign}
+            volunteers={volunteers}
+            scheduleRows={scheduleRows}
+            reloadData={reloadData}
+            currentMonth={currentMonth}
+            setCurrentMonth={setCurrentMonth}
+          />
         </div>
 
         <div className={currentTab === 'calendar' ? 'block' : 'hidden'}>
-          <CalendarManager isFetchingData={showFetchingMonth} readOnly={!isAdmin} volunteers={volunteers} scheduleRows={scheduleRows} reloadData={reloadData} currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} />
+          <CalendarManager
+            isFetchingData={showFetchingMonth}
+            readOnly={!(canCalendarViewAdd || canCalendarEdit || canCalendarDelete || canCalendarSave)}
+            canViewAddSchedule={canCalendarViewAdd}
+            canEditSchedule={canCalendarEdit}
+            canDeleteSchedule={canCalendarDelete}
+            canSaveSchedule={canCalendarSave}
+            volunteers={volunteers}
+            scheduleRows={scheduleRows}
+            reloadData={reloadData}
+            currentMonth={currentMonth}
+            setCurrentMonth={setCurrentMonth}
+          />
         </div>
 
         {/* Persistent Inspiration View */}
         <div className={currentTab === 'inspiration' ? 'block' : 'hidden'}>
-          <InspirationManager />
+          <InspirationManager
+            canVerse={canInspirationVerse}
+            canSong={canInspirationSong}
+            canLiturgy={canInspirationLiturgy}
+            canPrayer={canInspirationPrayer}
+            canAiIdea={canInspirationAi}
+          />
         </div>
 
         <AnimatePresence mode="wait">
@@ -541,14 +646,33 @@ function App() {
                         key={key}
                         volunteers={volunteers}
                         reloadData={reloadData}
+                        canView={canViewPetugas}
+                        canAdd={canAddPetugas}
+                        canEdit={canEditPetugas}
+                        canDelete={canDeletePetugas}
                         adminPanel={
-                          isAdmin ? (
-                            <AdminUserManager onBackup={handleBackup} onRestore={handleRestoreClick} />
-                          ) : null
+                          (
+                            <AdminUserManager
+                              onBackup={handleBackup}
+                              onRestore={handleRestoreClick}
+                              permissions={{
+                                viewRegisteredUsers: hasAction('volunteers', 'view_user_terdaftar'),
+                                editRegisteredUserRole: hasAction('volunteers', 'edit_role_user_terdaftar'),
+                                viewRole: hasAction('volunteers', 'view_role'),
+                                editRole: hasAction('volunteers', 'edit_role'),
+                                deleteRole: hasAction('volunteers', 'delete_role'),
+                                addRole: hasAction('volunteers', 'tambah_role'),
+                                viewDataSecurity: hasAction('volunteers', 'view_data_keamanan'),
+                                backupData: hasAction('volunteers', 'backup_data'),
+                                restoreData: hasAction('volunteers', 'restore_data')
+                              }}
+                            />
+                          )
                         }
                       />
                     );
                   case 'unavailable': return <UnavailableManager key={key} volunteers={volunteers} reloadData={reloadData} />;
+                  case 'foto': return <FotoManager key={key} canView={canViewFoto} />;
                   default: return null;
                 }
               })()}
@@ -670,7 +794,7 @@ function App() {
 
       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} />
 
-      <div className="bg-white border-b sticky top-0 z-40 px-3 sm:px-4 md:px-6 py-3 shadow-sm">
+      <div className="bg-white border-b-2 border-slate-900 sticky top-0 z-40 px-3 sm:px-4 md:px-6 py-3 shadow-sm">
         <div className="w-full md:w-[80%] mx-auto flex justify-between items-center gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
            {/* Logo Image Placeholder / Icon Fallback */}
@@ -704,7 +828,7 @@ function App() {
       <div className="w-full md:w-[80%] mx-auto pb-24 sm:pb-28">
         {renderContent()}
       </div>
-      <Navbar currentTab={currentTab} setTab={setCurrentTab} isViewer={!isAdmin} />
+      <Navbar currentTab={currentTab} setTab={setCurrentTab} isViewer={false} pageAccess={pageAccess} />
     </div>
   );
 }

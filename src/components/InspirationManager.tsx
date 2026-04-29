@@ -20,7 +20,19 @@ const getApiKey = () => {
 const API_KEY = getApiKey();
 const ai = new GoogleGenAI({ apiKey: API_KEY || 'MISSING_API_KEY' });
 
-export const InspirationManager: React.FC = () => {
+export const InspirationManager: React.FC<{
+  canVerse?: boolean;
+  canSong?: boolean;
+  canLiturgy?: boolean;
+  canPrayer?: boolean;
+  canAiIdea?: boolean;
+}> = ({
+  canVerse = true,
+  canSong = true,
+  canLiturgy = true,
+  canPrayer = true,
+  canAiIdea = true
+}) => {
   const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -183,6 +195,7 @@ export const InspirationManager: React.FC = () => {
       {/* Search Sections */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Ayat Alkitab */}
+        {canVerse && (
         <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-3">
           <div className="flex items-center gap-2 text-blue-600">
             <Book size={18} />
@@ -207,8 +220,10 @@ export const InspirationManager: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
         {/* Puji Syukur */}
+        {canSong && (
         <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-3">
           <div className="flex items-center gap-2 text-emerald-600">
             <Music size={18} />
@@ -233,8 +248,10 @@ export const InspirationManager: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
         {/* Ibadat Harian */}
+        {canLiturgy && (
         <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col space-y-3">
           <div className="flex items-center gap-2 text-rose-600">
             <Heart size={18} />
@@ -259,9 +276,11 @@ export const InspirationManager: React.FC = () => {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Search Prayer Section */}
+      {canPrayer && (
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Cari Doa</label>
         <div className="flex gap-2">
@@ -303,8 +322,10 @@ export const InspirationManager: React.FC = () => {
           </motion.div>
         )}
       </div>
+      )}
 
       {/* AI Inspiration Section */}
+      {canAiIdea && (
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
         <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Ide Kreatif AI</label>
         <div className="relative">
@@ -345,6 +366,7 @@ export const InspirationManager: React.FC = () => {
           </motion.div>
         )}
       </div>
+      )}
     </div>
   );
 };

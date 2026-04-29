@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { addDoc, collection, getFirestore, serverTimestamp, onSnapshot, query } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { addDoc, collection, getFirestore, serverTimestamp } from 'firebase/firestore';
+import { getAuth, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, User } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -19,20 +19,6 @@ export const db = app ? getFirestore(app) : null;
 const auth = app ? getAuth(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
-export const ADMIN_EMAILS = ['albertse2602@gmail.com', 'chayania.farista@gmail.com'];
-
-export const watchAdmins = (callback: (emails: string[]) => void) => {
-  if (!db) {
-    callback(ADMIN_EMAILS);
-    return () => {};
-  }
-  const q = query(collection(db, 'admins'));
-  return onSnapshot(q, (snapshot) => {
-    const dynamicAdmins = snapshot.docs.map(d => d.data().email.toLowerCase());
-    callback([...new Set([...ADMIN_EMAILS, ...dynamicAdmins])]);
-  });
-};
-
 export const ensureFirebaseAuth = async (): Promise<void> => {
   if (!auth) return;
   if (!auth.currentUser) {
@@ -50,7 +36,28 @@ export const watchAuthState = (callback: (user: User | null) => void) => {
 
 export const loginWithGoogle = async () => {
   if (!auth) throw new Error('FIREBASE_NOT_CONFIGURED');
-  return signInWithPopup(auth, googleProvider);
+  try {
+    return await signInWithPopup(auth, googleProvider);
+  } catch (error: any) {
+    const code = String(error?.code || '');
+    if (
+      code.includes('popup-blocked') ||
+      code.includes('operation-not-supported-in-this-environment')
+    ) {
+      return signInWithRedirect(auth, googleProvider);
+    }
+    throw error;
+  }
+};
+
+export const consumeRedirectLoginResult = async (): Promise<string | null> => {
+  if (!auth) return null;
+  try {
+    await getRedirectResult(auth);
+    return null;
+  } catch (error: any) {
+    return String(error?.code || 'unknown');
+  }
 };
 
 export const logoutFirebase = async () => {
@@ -83,14 +90,19 @@ export const logActivity = async (type: ActivityType, details: any = {}) => {
   }
   try {
     await ensureFirebaseAuth();
+    const actorEmail = getCurrentUserEmail().toLowerCase();
     const activitiesRef = collection(db, 'activities');
     await addDoc(activitiesRef, {
       type,
       details,
+      actorEmail,
       timestamp: serverTimestamp(),
       userAgent: navigator.userAgent
     });
   } catch (error) {
-    console.error('Failed to log activity to Firestore:', error);
+    const code = String((error as any)?.code || '');
+    if (!code.includes('permission-denied')) {
+      console.error('Failed to log activity to Firestore:', error);
+    }
   }
 };

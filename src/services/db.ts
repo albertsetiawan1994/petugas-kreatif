@@ -15,8 +15,16 @@ import {
   writeBatch,
   where
 } from 'firebase/firestore';
-import { Volunteer, MassEvent, ScheduleAssignment, CombinedScheduleRow } from '../types';
-import { ADMIN_EMAILS, db, ensureFirebaseAuth, getCurrentUserEmail, logActivity } from './firebase';
+import {
+  Volunteer,
+  MassEvent,
+  ScheduleAssignment,
+  CombinedScheduleRow,
+  AppPageKey,
+  ROLE_PAGE_DEFINITIONS,
+  UserRoleDefinition
+} from '../types';
+import { db, ensureFirebaseAuth, logActivity } from './firebase';
 
 interface AppDB extends DBSchema {
   volunteers: {
@@ -42,11 +50,72 @@ const COLLECTIONS = {
   events: 'events',
   assignments: 'assignments',
   backups: 'backups',
-  admins: 'admins'
+  admins: 'admins',
+  users: 'users',
+  roles: 'roles'
 } as const;
+
+const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com', 'chayania.farista@gmail.com'];
+
+const isSuperAdminEmail = (email: string) => SUPER_ADMIN_EMAILS.includes(String(email || '').toLowerCase());
+
+const buildActions = (value: boolean, pageKey: AppPageKey) => {
+  const def = ROLE_PAGE_DEFINITIONS.find(p => p.key === pageKey);
+  const actions: Record<string, boolean> = {};
+  (def?.functions || []).forEach(f => {
+    actions[f.key] = value;
+  });
+  return actions;
+};
+
+const buildPages = (enabledByDefault: boolean) => ({
+  home: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'home') },
+  calendar: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'calendar') },
+  inspiration: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'inspiration') },
+  volunteers: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'volunteers') },
+  foto: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'foto') }
+}) as UserRoleDefinition['pages'];
+
+const normalizeRole = (role: any): UserRoleDefinition => {
+  const roleName = String(role?.name || 'User');
+  const sourcePages = role?.pages || {};
+  const pages = buildPages(false);
+  (ROLE_PAGE_DEFINITIONS.map(p => p.key) as AppPageKey[]).forEach(pageKey => {
+    const srcPage = sourcePages[pageKey] || {};
+    const actionDefaults = buildActions(!!(srcPage.enabled ?? false), pageKey);
+    const mergedActions: Record<string, boolean> = { ...actionDefaults, ...(srcPage.actions || {}) };
+    pages[pageKey] = {
+      enabled: srcPage.enabled ?? false,
+      actions: mergedActions
+    };
+  });
+  return {
+    name: roleName,
+    isSystem: false,
+    pages
+  };
+};
+
+const buildSuperAdminRole = (): UserRoleDefinition => ({
+  name: 'Admin',
+  isSystem: true,
+  pages: buildPages(true)
+});
 
 let dbPromise: Promise<IDBPDatabase<AppDB>> | null = null;
 let bootstrapPromise: Promise<void> | null = null;
+
+const isLocalDbConnectionClosingError = (error: unknown) => {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'InvalidStateError' || error.name === 'AbortError') return true;
+  const message = (error.message || '').toLowerCase();
+  return message.includes('database connection is closing');
+};
+
+const isPermissionDeniedError = (error: any) => {
+  const code = String(error?.code || '');
+  return code.includes('permission-denied');
+};
 
 const getDB = () => {
   if (!dbPromise) {
@@ -75,21 +144,6 @@ const isCloudEnabled = !!db;
 const assertWriteAccess = async () => {
   if (!db) return;
   await ensureFirebaseAuth();
-  const currentEmail = getCurrentUserEmail().toLowerCase();
-  
-  // We'll need to check both static and dynamic admins here.
-  // For simplicity during transition, we'll allow current super-admins 
-  // and we'll check Firestore for dynamic ones if possible.
-  // But wait, dbService.isAdmin is not available here easily without circular dep or async.
-  // Let's use a simpler check: if it's in hardcoded list, it's fine. 
-  // If not, we'll need to fetch the admin list once or check the specific doc.
-  
-  if (ADMIN_EMAILS.includes(currentEmail)) return;
-  
-  const adminDoc = await getDoc(doc(db, COLLECTIONS.admins, currentEmail));
-  if (!adminDoc.exists()) {
-    throw new Error('READ_ONLY_ACCESS');
-  }
 };
 
 const chunkArray = <T>(items: T[], size = 400): T[][] => {
@@ -200,7 +254,14 @@ const ensureCloudBootstrap = async () => {
       group.forEach(item => {
         batch.set(doc(db, item.col, item.id), serializeForCloud(item.payload));
       });
-      await batch.commit();
+      try {
+        await batch.commit();
+      } catch (error) {
+        // Non-admin users may have read access but not write access to cloud.
+        // In that case, keep app usable with local data and skip bootstrap.
+        if (isPermissionDeniedError(error)) return;
+        throw error;
+      }
     }
   })().finally(() => {
     bootstrapPromise = null;
@@ -230,43 +291,222 @@ const getCloudSnapshot = async () => {
 };
 
 export const dbService = {
-  async getAllAdmins(): Promise<{ email: string, addedAt: any }[]> {
+  async getAllRoles(): Promise<UserRoleDefinition[]> {
     if (!db) return [];
     await ensureFirebaseAuth();
-    const snapshot = await getDocs(collection(db, COLLECTIONS.admins));
-    return snapshot.docs.map(d => ({ email: d.data().email, addedAt: d.data().addedAt }));
+    const snapshot = await getDocs(collection(db, COLLECTIONS.roles));
+    return snapshot.docs
+      .map(d => normalizeRole(d.data()))
+      .sort((a, b) => a.name.localeCompare(b.name));
   },
 
-  async addAdmin(email: string) {
+  async saveRoleDefinition(role: UserRoleDefinition) {
+    await assertWriteAccess();
+    if (!db) return;
+    const normalized = normalizeRole(role);
+    await setDoc(
+      doc(db, COLLECTIONS.roles, normalized.name.toLowerCase()),
+      {
+        ...normalized,
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+  },
+
+  async deleteRoleDefinition(roleName: string) {
+    await assertWriteAccess();
+    if (!db) return;
+    const name = roleName.trim();
+    await deleteDoc(doc(db, COLLECTIONS.roles, name.toLowerCase()));
+  },
+
+  async updateRegisteredUserRole(email: string, role: string) {
     await assertWriteAccess();
     if (!db) return;
     const emailLower = email.toLowerCase();
-    await setDoc(doc(db, COLLECTIONS.admins, emailLower), {
-      email: emailLower,
-      addedAt: serverTimestamp()
-    });
-    await logActivity('ADMIN_ADD' as any, { email: emailLower });
+    await setDoc(
+      doc(db, COLLECTIONS.users, emailLower),
+      {
+        email: emailLower,
+        role,
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
   },
 
-  async removeAdmin(email: string) {
-    await assertWriteAccess();
-    if (!db) return;
-    const emailLower = email.toLowerCase();
-    if (ADMIN_EMAILS.includes(emailLower)) {
-      throw new Error('CANNOT_REMOVE_SUPER_ADMIN');
+  async getUserNavAccess(email: string): Promise<Record<AppPageKey, boolean>> {
+    const fallback: Record<AppPageKey, boolean> = {
+      home: false,
+      calendar: false,
+      inspiration: false,
+      volunteers: false,
+      foto: false
+    };
+    const emailLower = String(email || '').toLowerCase();
+    if (isSuperAdminEmail(emailLower)) {
+      return { home: true, calendar: true, inspiration: true, volunteers: true, foto: true };
     }
-    await deleteDoc(doc(db, COLLECTIONS.admins, emailLower));
-    await logActivity('ADMIN_REMOVE' as any, { email: emailLower });
+    if (!db || !emailLower) return fallback;
+    await ensureFirebaseAuth();
+
+    const userDoc = await getDoc(doc(db, COLLECTIONS.users, emailLower));
+    const userRoleName = String(userDoc.data()?.role || 'User');
+    const roles = await dbService.getAllRoles();
+    const role = roles.find(r => r.name.toLowerCase() === userRoleName.toLowerCase()) || normalizeRole({ name: userRoleName });
+    return {
+      home: !!role.pages.home.enabled,
+      calendar: !!role.pages.calendar.enabled,
+      inspiration: !!role.pages.inspiration.enabled,
+      volunteers: !!role.pages.volunteers.enabled,
+      foto: !!role.pages.foto?.enabled
+    };
+  },
+
+  async getUserRoleDefinition(email: string): Promise<UserRoleDefinition> {
+    const emailLower = String(email || '').toLowerCase();
+    if (isSuperAdminEmail(emailLower)) {
+      return buildSuperAdminRole();
+    }
+    if (!db || !emailLower) {
+      return normalizeRole({ name: 'User' });
+    }
+    await ensureFirebaseAuth();
+    const userDoc = await getDoc(doc(db, COLLECTIONS.users, emailLower));
+    const userRoleName = String(userDoc.data()?.role || 'User');
+    const roles = await dbService.getAllRoles();
+    const role = roles.find(r => r.name.toLowerCase() === userRoleName.toLowerCase());
+    return normalizeRole(role || { name: userRoleName });
+  },
+
+  async getAllRegisteredUsers(): Promise<Array<{ email: string; role: string; source?: string; updatedAt?: any }>> {
+    if (!db) return [];
+    await ensureFirebaseAuth();
+    const [usersSnapshot, adminsSnapshot, activitiesSnapshot] = await Promise.all([
+      getDocs(collection(db, COLLECTIONS.users)),
+      getDocs(collection(db, COLLECTIONS.admins)),
+      getDocs(collection(db, 'activities'))
+    ]);
+
+    const map = new Map<string, { email: string; role: string; source?: string; updatedAt?: any }>();
+
+    usersSnapshot.docs.forEach((d) => {
+      const data = d.data() || {};
+      const email = String((data as any).email || d.id).toLowerCase();
+      if (!email) return;
+      map.set(email, {
+        email,
+        role: String((data as any).role || 'User'),
+        source: (data as any).source,
+        updatedAt: (data as any).updatedAt
+      });
+    });
+
+    adminsSnapshot.docs.forEach((d) => {
+      const email = String((d.data() as any).email || d.id).toLowerCase();
+      if (!email) return;
+      if (!map.has(email)) {
+        map.set(email, {
+          email,
+          role: 'User',
+          source: 'email_list',
+          updatedAt: (d.data() as any).addedAt
+        });
+      }
+    });
+
+    activitiesSnapshot.docs.forEach((d) => {
+      const data: any = d.data() || {};
+      const candidates = [
+        data?.actorEmail,
+        data?.details?.email,
+        data?.details?.userEmail
+      ];
+      candidates.forEach((raw) => {
+        const email = String(raw || '').toLowerCase().trim();
+        if (!email || !email.includes('@')) return;
+        if (!map.has(email)) {
+          map.set(email, { email, role: 'User', source: 'activity', updatedAt: data?.timestamp });
+        }
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.email.localeCompare(b.email));
+  },
+
+  async upsertRegisteredUser(params: { email: string; role?: string; source?: string }) {
+    if (!db) return;
+    await ensureFirebaseAuth();
+    const emailLower = params.email.toLowerCase();
+    const payload: Record<string, any> = {
+      email: emailLower,
+      source: params.source || 'google_login',
+      updatedAt: serverTimestamp()
+    };
+    if (typeof params.role === 'string' && params.role.trim()) {
+      payload.role = params.role.trim();
+    } else if (isSuperAdminEmail(emailLower)) {
+      payload.role = 'Admin';
+    }
+    await setDoc(
+      doc(db, COLLECTIONS.users, emailLower),
+      payload,
+      { merge: true }
+    );
+  },
+
+  subscribeUserRoleAndAccessRealtime(email: string, callback: (navAccess: Record<AppPageKey, boolean>, roleDef: UserRoleDefinition) => void): Unsubscribe {
+    if (!db || !email) {
+      // Return a no-op unsubscribe function if not authenticated or no email
+      return () => {};
+    }
+
+    const emailLower = String(email || '').toLowerCase();
+    let userRoleName: string | null = null;
+    let allRoles: UserRoleDefinition[] = [];
+
+    const evaluateAndCallback = async () => {
+      const currentNavAccess = await dbService.getUserNavAccess(emailLower);
+      const currentUserRoleDef = await dbService.getUserRoleDefinition(emailLower);
+      callback(currentNavAccess, currentUserRoleDef);
+    };
+
+    // Listener for user's assigned role
+    const userDocRef = doc(db, COLLECTIONS.users, emailLower);
+    const unsubscribeUser = onSnapshot(userDocRef, (docSnapshot) => {
+      userRoleName = String(docSnapshot.data()?.role || 'User');
+      evaluateAndCallback();
+    });
+
+    // Listener for role definitions (permissions)
+    const rolesColRef = collection(db, COLLECTIONS.roles);
+    const unsubscribeRoles = onSnapshot(rolesColRef, (snapshot) => {
+      allRoles = snapshot.docs.map(d => normalizeRole(d.data()));
+      evaluateAndCallback();
+    });
+
+    return () => {
+      unsubscribeUser();
+      unsubscribeRoles();
+    };
   },
 
   async getAllVolunteers(): Promise<Volunteer[]> {
     if (!db) {
       return (await getDB()).getAll('volunteers');
     }
-    await ensureFirebaseAuth();
-    await ensureCloudBootstrap();
-    const snapshot = await getDocs(collection(db, COLLECTIONS.volunteers));
-    return snapshot.docs.map(d => stripFirestoreMeta<Volunteer>(d.data()));
+    try {
+      await ensureFirebaseAuth();
+      await ensureCloudBootstrap();
+      const snapshot = await getDocs(collection(db, COLLECTIONS.volunteers));
+      return snapshot.docs.map(d => stripFirestoreMeta<Volunteer>(d.data()));
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        return (await getDB()).getAll('volunteers');
+      }
+      throw error;
+    }
   },
 
   // Local-first helpers (IndexedDB) to make refresh instant even when cloud is enabled.
@@ -302,20 +542,29 @@ export const dbService = {
       const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
       return allEvents.filter(e => e.date.startsWith(prefix));
     }
-    await ensureFirebaseAuth();
-    await ensureCloudBootstrap();
-    const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
-    const nextMonth = month === 11 ? 1 : month + 2;
-    const nextYear = month === 11 ? year + 1 : year;
-    const end = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-    const snapshot = await getDocs(
-      query(
-        collection(db, COLLECTIONS.events),
-        where('date', '>=', start),
-        where('date', '<', end)
-      )
-    );
-    return snapshot.docs.map(d => stripFirestoreMeta<MassEvent>(d.data()));
+    try {
+      await ensureFirebaseAuth();
+      await ensureCloudBootstrap();
+      const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const nextMonth = month === 11 ? 1 : month + 2;
+      const nextYear = month === 11 ? year + 1 : year;
+      const end = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+      const snapshot = await getDocs(
+        query(
+          collection(db, COLLECTIONS.events),
+          where('date', '>=', start),
+          where('date', '<', end)
+        )
+      );
+      return snapshot.docs.map(d => stripFirestoreMeta<MassEvent>(d.data()));
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        const allEvents = await (await getDB()).getAll('events');
+        const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+        return allEvents.filter(e => e.date.startsWith(prefix));
+      }
+      throw error;
+    }
   },
 
   async getEventsByMonthLocal(year: number, month: number): Promise<MassEvent[]> {
@@ -359,14 +608,23 @@ export const dbService = {
       const results = await Promise.all(eventIds.map(id => dbLocal.get('assignments', id)));
       return results.filter((r): r is ScheduleAssignment => !!r);
     }
-    await ensureFirebaseAuth();
-    await ensureCloudBootstrap();
-    const results = await Promise.all(
-      eventIds.map(id => getDoc(doc(db, COLLECTIONS.assignments, id)))
-    );
-    return results
-      .map(r => (r.exists() ? stripFirestoreMeta<ScheduleAssignment>(r.data()) : null))
-      .filter((r): r is ScheduleAssignment => !!r);
+    try {
+      await ensureFirebaseAuth();
+      await ensureCloudBootstrap();
+      const results = await Promise.all(
+        eventIds.map(id => getDoc(doc(db, COLLECTIONS.assignments, id)))
+      );
+      return results
+        .map(r => (r.exists() ? stripFirestoreMeta<ScheduleAssignment>(r.data()) : null))
+        .filter((r): r is ScheduleAssignment => !!r);
+    } catch (error) {
+      if (isPermissionDeniedError(error)) {
+        const dbLocal = await getDB();
+        const results = await Promise.all(eventIds.map(id => dbLocal.get('assignments', id)));
+        return results.filter((r): r is ScheduleAssignment => !!r);
+      }
+      throw error;
+    }
   },
 
   async getAssignmentsLocal(eventIds: string[]): Promise<ScheduleAssignment[]> {
@@ -376,15 +634,33 @@ export const dbService = {
   },
 
   async cacheSnapshotLocally(params: { volunteers?: Volunteer[]; events?: MassEvent[]; assignments?: ScheduleAssignment[] }) {
-    const dbLocal = await getDB();
-    const tx = dbLocal.transaction(['volunteers', 'events', 'assignments'], 'readwrite');
-    const { volunteers = [], events = [], assignments = [] } = params;
-    await Promise.all([
-      ...volunteers.map(v => tx.objectStore('volunteers').put(v)),
-      ...events.map(e => tx.objectStore('events').put(e)),
-      ...assignments.map(a => tx.objectStore('assignments').put(a)),
-    ]);
-    await tx.done;
+    const writeSnapshot = async (attempt = 0): Promise<void> => {
+      try {
+        const dbLocal = await getDB();
+        const tx = dbLocal.transaction(['volunteers', 'events', 'assignments'], 'readwrite');
+        const { volunteers = [], events = [], assignments = [] } = params;
+        await Promise.all([
+          ...volunteers.map(v => tx.objectStore('volunteers').put(v)),
+          ...events.map(e => tx.objectStore('events').put(e)),
+          ...assignments.map(a => tx.objectStore('assignments').put(a)),
+        ]);
+        await tx.done;
+      } catch (error) {
+        if (attempt === 0 && isLocalDbConnectionClosingError(error)) {
+          try {
+            const existingDb = await dbPromise;
+            existingDb.close();
+          } catch {
+            // no-op: best-effort close before reopening
+          }
+          dbPromise = null;
+          return writeSnapshot(1);
+        }
+        throw error;
+      }
+    };
+
+    await writeSnapshot();
   },
 
   subscribeVolunteersRealtime(callback: (volunteers: Volunteer[]) => void): Unsubscribe {
@@ -400,7 +676,9 @@ export const dbService = {
       }
       callback(sorted);
     }, (error) => {
-      console.error('subscribeVolunteersRealtime error', error);
+      if (!isPermissionDeniedError(error)) {
+        console.error('subscribeVolunteersRealtime error', error);
+      }
     });
   },
 
@@ -454,14 +732,18 @@ export const dbService = {
       latestEvents = snapshot.docs.map(d => stripFirestoreMeta<MassEvent>(d.data()));
       void emitIfReady();
     }, (error) => {
-      console.error('subscribeMonthScheduleRealtime events error', error);
+      if (!isPermissionDeniedError(error)) {
+        console.error('subscribeMonthScheduleRealtime events error', error);
+      }
     });
 
     const unsubAssignments = onSnapshot(assignmentsQuery, (snapshot) => {
       latestAssignments = snapshot.docs.map(d => stripFirestoreMeta<ScheduleAssignment>(d.data()));
       void emitIfReady();
     }, (error) => {
-      console.error('subscribeMonthScheduleRealtime assignments error', error);
+      if (!isPermissionDeniedError(error)) {
+        console.error('subscribeMonthScheduleRealtime assignments error', error);
+      }
     });
 
     return () => {

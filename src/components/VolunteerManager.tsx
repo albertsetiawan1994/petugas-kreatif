@@ -10,8 +10,20 @@ import { showAlert } from '../services/alertService';
 export const VolunteerManager: React.FC<{ 
   volunteers: Volunteer[], 
   reloadData: () => void,
-  adminPanel?: React.ReactNode
-}> = ({ volunteers: globalVolunteers, reloadData, adminPanel }) => {
+  adminPanel?: React.ReactNode,
+  canView?: boolean,
+  canAdd?: boolean,
+  canEdit?: boolean,
+  canDelete?: boolean
+}> = ({
+  volunteers: globalVolunteers,
+  reloadData,
+  adminPanel,
+  canView = true,
+  canAdd = true,
+  canEdit = true,
+  canDelete = true
+}) => {
   const [volunteers, setVolunteers] = useState<Volunteer[]>(globalVolunteers);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -36,6 +48,10 @@ export const VolunteerManager: React.FC<{
   };
 
   const handleSave = async () => {
+    if ((!isEditing && !canAdd) || (isEditing && !canEdit)) {
+      showAlert('Role Anda tidak memiliki izin untuk aksi ini.');
+      return;
+    }
     const trimmedName = name.trim();
     if (!trimmedName) {
       showAlert("Nama petugas tidak boleh kosong!");
@@ -73,6 +89,7 @@ export const VolunteerManager: React.FC<{
   };
 
   const handleDeleteClick = (e: React.MouseEvent, id: string) => {
+    if (!canDelete) return;
     e.stopPropagation();
     setDeleteTargetId(id);
   };
@@ -99,6 +116,7 @@ export const VolunteerManager: React.FC<{
   };
 
   const handleEdit = (v: Volunteer) => {
+    if (!canEdit) return;
     setIsEditing(true);
     setCurrentId(v.id);
     setName(v.name);
@@ -114,6 +132,7 @@ export const VolunteerManager: React.FC<{
   };
 
   const handleToggleAutoFill = async (v: Volunteer) => {
+    if (!canEdit) return;
     const updated = { ...v, excludeFromAutoFill: !v.excludeFromAutoFill };
     await dbService.saveVolunteer(updated);
     reloadData();
@@ -136,6 +155,7 @@ export const VolunteerManager: React.FC<{
       <h2 className="text-xl font-bold mb-4 text-slate-800">Manajemen Petugas</h2>
 
       {/* Form */}
+      {(canAdd || canEdit) && (
       <div className="bg-white p-4 rounded-lg shadow-sm mb-6 border border-gray-100">
         <h3 className="font-medium mb-3 text-slate-700">{isEditing ? 'Edit Petugas' : 'Tambah Petugas Baru'}</h3>
         
@@ -191,8 +211,10 @@ export const VolunteerManager: React.FC<{
           )}
         </div>
       </div>
+      )}
 
       {/* Search Input */}
+      {canView && (
       <div className="relative mb-4">
         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <Search size={16} className="text-gray-400" />
@@ -213,9 +235,14 @@ export const VolunteerManager: React.FC<{
           </button>
         )}
       </div>
+      )}
 
       {/* List */}
       <div className="space-y-3">
+        {!canView ? (
+          <p className="text-center text-gray-400 mt-8">Role Anda tidak memiliki akses melihat data petugas.</p>
+        ) : (
+        <>
         {filteredVolunteers.map(v => {
           const isDeleting = v.id === deletingId;
           return (
@@ -229,16 +256,16 @@ export const VolunteerManager: React.FC<{
               <div className="flex gap-2 items-center">
                 {!isDeleting && (
                     <>
-                      <button 
+                      {canEdit && <button 
                         onClick={() => handleToggleAutoFill(v)} 
                         className={`p-2 rounded-full transition ${v.excludeFromAutoFill ? 'text-gray-400 bg-gray-100' : 'text-amber-500 bg-amber-50 hover:bg-amber-100'}`}
                         title={v.excludeFromAutoFill ? "Petugas tidak akan digenerate otomatis" : "Petugas akan digenerate otomatis"}
                       >
                         <Sparkles size={16} className={v.excludeFromAutoFill ? 'opacity-50' : ''} />
-                      </button>
-                      <button onClick={() => handleEdit(v)} className="p-2 text-blue-600 bg-blue-50 rounded-full hover:bg-blue-100 transition">
+                      </button>}
+                      {canEdit && <button onClick={() => handleEdit(v)} className="p-2 text-blue-600 bg-blue-50 rounded-full hover:bg-blue-100 transition">
                         <Edit2 size={16} />
-                      </button>
+                      </button>}
                     </>
                 )}
                 
@@ -246,7 +273,7 @@ export const VolunteerManager: React.FC<{
                     <div className="p-2 text-red-400 bg-red-50 rounded-full">
                         <Loader2 size={16} className="animate-spin" />
                     </div>
-                ) : (
+                ) : canDelete ? (
                     <button 
                         type="button"
                         onClick={(e) => handleDeleteClick(e, v.id)} 
@@ -254,7 +281,7 @@ export const VolunteerManager: React.FC<{
                     >
                     <Trash2 size={16} />
                     </button>
-                )}
+                ) : null}
               </div>
             </div>
           );
@@ -263,6 +290,8 @@ export const VolunteerManager: React.FC<{
           <p className="text-center text-gray-400 mt-8">
             {searchQuery ? `Tidak ada petugas dengan nama "${searchQuery}"` : 'Belum ada data petugas.'}
           </p>
+        )}
+        </>
         )}
       </div>
 

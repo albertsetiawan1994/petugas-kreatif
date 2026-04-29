@@ -174,12 +174,26 @@ const CAPTURE_SIDE_PADDING = 80;
 export const ScheduleDashboard: React.FC<{ 
   isFetchingData?: boolean,
   readOnly?: boolean, 
+  canScreenshot?: boolean,
+  canGenerate?: boolean,
+  canManualAssign?: boolean,
   volunteers: Volunteer[], 
   scheduleRows: CombinedScheduleRow[],
   reloadData: () => void,
   currentMonth: Date,
   setCurrentMonth: (date: Date) => void
-}> = ({ isFetchingData = false, readOnly = false, volunteers, scheduleRows, reloadData, currentMonth: currentDate, setCurrentMonth: setCurrentDate }) => {
+}> = ({
+  isFetchingData = false,
+  readOnly = false,
+  canScreenshot = true,
+  canGenerate = true,
+  canManualAssign = true,
+  volunteers,
+  scheduleRows,
+  reloadData,
+  currentMonth: currentDate,
+  setCurrentMonth: setCurrentDate
+}) => {
   const [rows, setRows] = useState<CombinedScheduleRow[]>(scheduleRows);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -216,7 +230,7 @@ export const ScheduleDashboard: React.FC<{
    * Generates a single cell assignment based on fair rotation logic
    */
   const handleSingleCellGenerate = async (eventId: string, field: keyof ScheduleAssignment, role: Role) => {
-    if (readOnly) return;
+    if (readOnly || !canGenerate) return;
     const row = rows.find(r => r.event.id === eventId);
     if (!row) return;
 
@@ -266,7 +280,7 @@ export const ScheduleDashboard: React.FC<{
    * Generates assignments for all roles in a single row (mass)
    */
   const handleRowGenerate = async (eventId: string) => {
-    if (readOnly) return;
+    if (readOnly || !canGenerate) return;
     const row = rows.find(r => r.event.id === eventId);
     if (!row) return;
 
@@ -332,7 +346,7 @@ export const ScheduleDashboard: React.FC<{
   };
 
   const handleUpdateCell = async (eventId: string, field: keyof ScheduleAssignment, value: string) => {
-    if (readOnly) return;
+    if (readOnly || !canManualAssign) return;
     setIsSaving(true);
     // Optimistic Update
     const updatedRows = rows.map(r => {
@@ -385,6 +399,10 @@ export const ScheduleDashboard: React.FC<{
   };
 
   const handleScreenshotClick = async () => {
+    if (!canScreenshot) {
+      showAlert('Role Anda tidak memiliki akses Screenshot.');
+      return;
+    }
     if (customScreenshotMode) {
       const customWeeks = parseCustomWeekInput(customWeekInput);
 
@@ -859,7 +877,7 @@ export const ScheduleDashboard: React.FC<{
                         onChange={handleUpdateCell}
                         onMagic={handleSingleCellGenerate}
                         isImage={captureMode}
-                        readOnly={readOnly}
+                        readOnly={readOnly || !canManualAssign}
                       />
                     ) : <span className="text-gray-400">-</span>}
                   </td>
@@ -875,7 +893,7 @@ export const ScheduleDashboard: React.FC<{
                         onChange={handleUpdateCell}
                         onMagic={handleSingleCellGenerate}
                         isImage={captureMode}
-                        readOnly={readOnly}
+                        readOnly={readOnly || !canManualAssign}
                       />
                     ) : <span className="text-gray-400">-</span>}
                   </td>
@@ -891,7 +909,7 @@ export const ScheduleDashboard: React.FC<{
                         onChange={handleUpdateCell}
                         onMagic={handleSingleCellGenerate}
                         isImage={captureMode}
-                        readOnly={readOnly}
+                        readOnly={readOnly || !canManualAssign}
                       />
                     ) : <span className="text-gray-400">-</span>}
                   </td>
@@ -907,7 +925,7 @@ export const ScheduleDashboard: React.FC<{
                         onChange={handleUpdateCell}
                         onMagic={handleSingleCellGenerate}
                         isImage={captureMode}
-                        readOnly={readOnly}
+                        readOnly={readOnly || !canManualAssign}
                       />
                     ) : <span className="text-gray-400">-</span>}
                   </td>
@@ -926,12 +944,12 @@ export const ScheduleDashboard: React.FC<{
                         onChange={handleUpdateCell}
                         onMagic={handleSingleCellGenerate}
                         isImage={captureMode}
-                        readOnly={readOnly}
+                        readOnly={readOnly || !canManualAssign}
                       />
                     ) : <span className="text-gray-400">-</span>}
                   </td>
 
-                  {!captureMode && !readOnly && (
+                  {!captureMode && !readOnly && canGenerate && (
                     <td className="p-2 text-center align-middle border-b border-r border-slate-200 bg-white">
                       <button
                         onClick={() => handleRowGenerate(row.event.id)}
@@ -1001,7 +1019,7 @@ export const ScheduleDashboard: React.FC<{
 
         {/* Combo Download Toolbar */}
         <div className={`flex justify-center gap-2 ${customScreenshotMode ? 'flex-col sm:flex-row sm:items-center' : 'items-center'}`}>
-            {customScreenshotMode ? (
+            {canScreenshot && customScreenshotMode ? (
               <>
                 <input
                   type="text"
@@ -1027,7 +1045,7 @@ export const ScheduleDashboard: React.FC<{
                   </button>
                 </div>
               </>
-            ) : (
+            ) : canScreenshot ? (
               <>
                 <div className="relative">
                     <select 
@@ -1060,7 +1078,7 @@ export const ScheduleDashboard: React.FC<{
                     <Camera size={14} /> Screenshot
                 </button>
               </>
-            )}
+            ) : null}
         </div>
       </div>
 
@@ -1087,7 +1105,7 @@ export const ScheduleDashboard: React.FC<{
                              </span>
                            )}
                          </div>
-                         {!readOnly && (
+                          {!readOnly && canGenerate && (
                            <button 
                               onClick={() => handleRowGenerate(row.event.id)}
                               className="bg-white p-2 rounded-xl border border-gray-200 text-indigo-600 shadow-sm active:scale-90 transition-transform flex items-center gap-2 px-3"
@@ -1129,7 +1147,7 @@ export const ScheduleDashboard: React.FC<{
                                         />
                                       </div>
                                     )}
-                                    {!readOnly && (
+                                    {!readOnly && canGenerate && (
                                       <button 
                                           onClick={() => handleSingleCellGenerate(row.event.id, cfg.key as any, cfg.role)}
                                           className={`p-1.5 rounded-lg transition-all ${currentVal ? 'text-indigo-400 bg-indigo-50' : 'text-gray-300 bg-gray-50'}`}

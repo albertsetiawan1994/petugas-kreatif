@@ -13,12 +13,28 @@ import { showAlert } from '../services/alertService';
 export const CalendarManager: React.FC<{ 
   isFetchingData?: boolean,
   readOnly?: boolean,
+  canViewAddSchedule?: boolean,
+  canEditSchedule?: boolean,
+  canDeleteSchedule?: boolean,
+  canSaveSchedule?: boolean,
   volunteers: Volunteer[], 
   scheduleRows: CombinedScheduleRow[],
   reloadData: () => void,
   currentMonth: Date,
   setCurrentMonth: (date: Date) => void
-}> = ({ isFetchingData = false, readOnly = false, volunteers, scheduleRows, reloadData, currentMonth: currentDate, setCurrentMonth: setCurrentDate }) => {
+}> = ({
+  isFetchingData = false,
+  readOnly = false,
+  canViewAddSchedule = true,
+  canEditSchedule = true,
+  canDeleteSchedule = true,
+  canSaveSchedule = true,
+  volunteers,
+  scheduleRows,
+  reloadData,
+  currentMonth: currentDate,
+  setCurrentMonth: setCurrentDate
+}) => {
   const [events, setEvents] = useState<MassEvent[]>(scheduleRows.map(r => r.event));
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,13 +98,14 @@ export const CalendarManager: React.FC<{
   };
 
   const handleDateClick = (date: Date) => {
-    if (readOnly) return; // Restrict normal users from opening the form
+    if (readOnly || !canViewAddSchedule) return;
     setSelectedDate(date);
     resetForm(date);
     setIsModalOpen(true);
   };
 
   const handleEditEvent = async (ev: MassEvent) => {
+    if (!canEditSchedule) return;
     if (deletingId) return; // Prevent edit if deleting
 
     setEditingId(ev.id);
@@ -246,6 +263,10 @@ export const CalendarManager: React.FC<{
   };
 
   const handleSaveEvent = async () => {
+    if (!canSaveSchedule) {
+      showAlert('Role Anda tidak memiliki akses Simpan Jadwal.');
+      return;
+    }
     if (!selectedDate) return;
 
     // VALIDASI: Minimal satu role dipilih agar bisa generate jadwal
@@ -332,6 +353,10 @@ export const CalendarManager: React.FC<{
   };
 
   const confirmDelete = async () => {
+    if (!canDeleteSchedule) {
+      showAlert('Role Anda tidak memiliki akses Delete Jadwal.');
+      return;
+    }
     if (!deleteTargetId) return;
     
     const idToDelete = deleteTargetId;
@@ -430,7 +455,7 @@ export const CalendarManager: React.FC<{
               className={`min-h-[80px] bg-white border rounded p-1 flex flex-col items-start transition relative ${
                 !isSameMonth(day, currentDate) ? 'opacity-40 border-gray-100' : 'border-gray-200'
               } ${isToday ? 'ring-1 ring-blue-500 ring-offset-1' : ''} ${
-                readOnly ? 'cursor-default' : 'hover:border-blue-400 cursor-pointer'
+                (readOnly || !canViewAddSchedule) ? 'cursor-default' : 'hover:border-blue-400 cursor-pointer'
               }`}
             >
               <span className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full ${
@@ -480,7 +505,7 @@ export const CalendarManager: React.FC<{
               
               {/* Form Title */}
               <div className="flex items-center justify-between mb-4">
-                 {!readOnly && (
+                 {!readOnly && canViewAddSchedule && (
                    <div className="flex items-center gap-2">
                      <h4 className={`text-sm font-bold uppercase tracking-wider ${editingId ? 'text-amber-600' : 'text-blue-600'}`}>
                        {editingId ? 'Edit Jadwal' : 'Tambah Jadwal Baru'}
@@ -515,7 +540,7 @@ export const CalendarManager: React.FC<{
                      Detail Jadwal
                    </h4>
                  )}
-                 {editingId && !readOnly && (
+                  {editingId && !readOnly && canEditSchedule && (
                    <button 
                      onClick={() => selectedDate && resetForm(selectedDate)}
                      className="text-xs text-gray-500 hover:text-gray-800 underline"
@@ -532,7 +557,7 @@ export const CalendarManager: React.FC<{
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama Misa</label>
-                    {!readOnly && (
+                     {!readOnly && canEditSchedule && (
                       <label className="flex items-center gap-1.5 cursor-pointer group">
                         <div className="relative">
                           <input 
@@ -566,7 +591,7 @@ export const CalendarManager: React.FC<{
                   <div className="flex-1">
                     <label className="block text-xs font-semibold text-gray-500 mb-1">MISA KE</label>
                     <div className="flex items-center h-[42px]">
-                      {!readOnly && (
+                {!readOnly && canSaveSchedule && (
                         <button 
                            className="h-full w-10 flex items-center justify-center bg-gray-100 border border-gray-300 rounded-l-lg hover:bg-gray-200 active:bg-gray-300 transition"
                            onClick={() => {
@@ -863,7 +888,7 @@ export const CalendarManager: React.FC<{
                              <div className="p-2 text-red-400 bg-red-50 rounded-lg">
                                <Loader2 size={18} className="animate-spin" />
                              </div>
-                           ) : !readOnly && (
+                            ) : !readOnly && canDeleteSchedule && (
                              <button 
                                type="button"
                                onClick={(e) => handleDeleteClick(e, ev.id)} 

@@ -6,17 +6,49 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == "google.com";
     }
 
+    function currentEmail() {
+      return request.auth.token.email.lower();
+    }
+
     function isAdminEmail() {
-      return request.auth.token.email in [
+      return currentEmail() in [
         "albertse2602@gmail.com",
         "chayania.farista@gmail.com"
       ];
     }
 
-    // Semua user Google bisa baca, hanya email admin yang bisa ubah.
+    function isElevatedUser() {
+      return isAdminEmail()
+        || get(/databases/$(database)/documents/users/$(currentEmail())).data.role in ["Admin", "Administrator"];
+    }
+
+    match /users/{userEmail} {
+      allow read: if isGoogleUser();
+      allow create: if isGoogleUser()
+        && currentEmail() == userEmail.lower()
+        && request.resource.data.email == currentEmail();
+      allow update: if isGoogleUser()
+        && (
+          isElevatedUser()
+          || (
+            currentEmail() == userEmail.lower()
+            && request.resource.data.email == resource.data.email
+            && request.resource.data.role == resource.data.role
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /activities/{activityId} {
+      allow read: if isGoogleUser();
+      allow create: if isGoogleUser() && request.resource.data.actorEmail == currentEmail();
+      allow update, delete: if false;
+    }
+
+    // Semua user Google bisa baca, hanya elevated user yang bisa ubah data utama.
     match /{document=**} {
       allow read: if isGoogleUser();
-      allow write: if isGoogleUser() && isAdminEmail();
+      allow write: if isGoogleUser() && isElevatedUser();
     }
   }
 }

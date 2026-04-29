@@ -1,23 +1,28 @@
 import React from 'react';
-import { Calendar, Users, Home, Sparkles } from 'lucide-react';
+import { Calendar, Users, Home, Sparkles, Camera } from 'lucide-react';
+import { AppPageKey } from '../types';
 
 interface NavbarProps {
   currentTab: string;
   setTab: (tab: string) => void;
   isViewer?: boolean;
+  pageAccess?: Record<AppPageKey, boolean>;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentTab, setTab, isViewer = false }) => {
-  const navItems = isViewer ? [
-    { id: 'home', icon: Home, label: 'Jadwal' },
-    { id: 'calendar', icon: Calendar, label: 'Kalender' },
-    { id: 'inspiration', icon: Sparkles, label: 'Inspirasi' }
-  ] : [
+export const Navbar: React.FC<NavbarProps> = ({ currentTab, setTab, isViewer = false, pageAccess }) => {
+  const allItems = [
     { id: 'home', icon: Home, label: 'Jadwal' },
     { id: 'calendar', icon: Calendar, label: 'Kalender' },
     { id: 'inspiration', icon: Sparkles, label: 'Inspirasi' },
     { id: 'volunteers', icon: Users, label: 'Petugas' },
+    { id: 'foto', icon: Camera, label: 'Foto' },
   ];
+
+  const navItems = pageAccess
+    ? allItems.filter((item) => pageAccess[item.id as AppPageKey] !== false)
+    : isViewer
+      ? allItems.filter((item) => item.id !== 'volunteers')
+      : allItems;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 px-2 pb-[env(safe-area-inset-bottom)]">
