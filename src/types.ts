@@ -64,7 +64,7 @@ export interface Schedule {
     }
 }
 
-export type AppPageKey = 'home' | 'calendar' | 'inspiration' | 'volunteers' | 'foto';
+export type AppPageKey = 'home' | 'calendar' | 'inspiration' | 'volunteers' | 'foto' | 'admin';
 
 export interface RoleFunctionDefinition {
   key: string;
@@ -127,6 +127,25 @@ export const ROLE_PAGE_DEFINITIONS: RolePageDefinition[] = [
       { key: 'tambah_petugas', label: 'Tambah petugas' },
       { key: 'edit_petugas', label: 'Edit petugas' },
       { key: 'delete_petugas', label: 'Delete petugas' },
+    ],
+  },
+  {
+    key: 'foto',
+    label: 'Foto',
+    functions: [
+      { key: 'view_foto', label: 'View foto' },
+      { key: 'upload_foto', label: 'Upload foto' },
+      { key: 'simpan_foto', label: 'Simpan foto' },
+      { key: 'delete_foto', label: 'Delete foto' },
+      { key: 'edit_setting_foto', label: 'Edit setting foto' },
+      { key: 'reset_setting_foto', label: 'Reset setting foto' },
+      { key: 'urutkan_foto', label: 'Urutkan foto (drag)' },
+    ],
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    functions: [
       { key: 'view_user_terdaftar', label: 'View Management Admin' },
       { key: 'edit_role_user_terdaftar', label: 'Edit Role User' },
       { key: 'view_role', label: 'View role' },
@@ -136,15 +155,6 @@ export const ROLE_PAGE_DEFINITIONS: RolePageDefinition[] = [
       { key: 'view_data_keamanan', label: 'View Data & Keamanan' },
       { key: 'backup_data', label: 'Backup data' },
       { key: 'restore_data', label: 'Restore data' },
-    ],
-  },
-  {
-    key: 'foto',
-    label: 'Foto',
-    functions: [
-      { key: 'view_foto', label: 'View foto' },
-      { key: 'upload_foto', label: 'Upload foto' },
-      { key: 'delete_foto', label: 'Delete foto' },
     ],
   },
 ];

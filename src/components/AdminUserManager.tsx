@@ -21,6 +21,7 @@ interface AdminUserManagerProps {
 }
 
 type RegisteredUser = { email: string; role: string; source?: string; updatedAt?: any };
+const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com'];
 
 export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ onBackup, onRestore, permissions }) => {
   const [registeredUsersRaw, setRegisteredUsersRaw] = useState<RegisteredUser[]>([]);
@@ -80,7 +81,11 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ onBackup, on
       await loadAll();
     } catch (error) {
       console.error(error);
-      showAlert('Gagal mengubah role user');
+      if (error instanceof Error && error.message === 'FORBIDDEN_SUPER_ADMIN_UPDATE') {
+        showAlert('Role Admin tidak bisa mengubah role akun Super Admin.');
+      } else {
+        showAlert('Gagal mengubah role user');
+      }
     } finally {
       setLoading(false);
     }
@@ -104,7 +109,8 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ onBackup, on
         calendar: { enabled: false, actions: {} },
         inspiration: { enabled: false, actions: {} },
         volunteers: { enabled: false, actions: {} },
-        foto: { enabled: false, actions: {} }
+        foto: { enabled: false, actions: {} },
+        admin: { enabled: false, actions: {} }
       }
     };
     ROLE_PAGE_DEFINITIONS.forEach((p) => {
@@ -213,6 +219,9 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ onBackup, on
                   </div>
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 break-all leading-tight">{user.email}</p>
+                    {SUPER_ADMIN_EMAILS.includes(user.email) && (
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-600">Super Admin</p>
+                    )}
                   </div>
                 </div>
 
@@ -220,7 +229,7 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ onBackup, on
                   value={user.role}
                   onChange={(e) => handleAssignUserRole(user.email, e.target.value)}
                   className="w-full sm:w-auto px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold bg-white shadow-sm focus:ring-2 focus:ring-slate-100 outline-none transition-all"
-                  disabled={loading || !can.editRegisteredUserRole}
+                  disabled={loading || !can.editRegisteredUserRole || SUPER_ADMIN_EMAILS.includes(user.email)}
                 >
                   {roleNames.map((name) => (
                     <option key={name} value={name}>{name}</option>

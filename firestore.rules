@@ -12,8 +12,7 @@ service cloud.firestore {
 
     function isAdminEmail() {
       return currentEmail() in [
-        "albertse2602@gmail.com",
-        "chayania.farista@gmail.com"
+        "albertse2602@gmail.com"
       ];
     }
 

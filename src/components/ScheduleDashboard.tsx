@@ -157,17 +157,18 @@ import { Capacitor } from '@capacitor/core';
 import { fileUtils } from '../services/fileUtils';
 import { notifyDownloadedFile } from '../services/nativeDownloadNotifications';
 
-const DESKTOP_DATE_COL_MIN = 320;
-const DESKTOP_DATE_COL_MAX = 320;
+const DESKTOP_DATE_COL_MIN = 250;
+const DESKTOP_DATE_COL_MAX = 250;
 const DESKTOP_DATE_COL_WIDTH = `${DESKTOP_DATE_COL_MIN}px`;
-const DESKTOP_TIME_COL_WIDTH = 96;
+const DESKTOP_TIME_COL_WIDTH = 74;
 const CAPTURE_TIME_COL_WIDTH = 150;
-const DESKTOP_MEDIA_COL_MIN = 150;
-const DESKTOP_MEDIA_COL_MAX = 150;
+const DESKTOP_MEDIA_COL_MIN = 118;
+const DESKTOP_MEDIA_COL_MAX = 118;
 const DESKTOP_MEDIA_COL_WIDTH = `${DESKTOP_MEDIA_COL_MIN}px`;
-const DESKTOP_FOTO_COL_MIN = 220;
-const DESKTOP_FOTO_COL_MAX = 220;
+const DESKTOP_FOTO_COL_MIN = 170;
+const DESKTOP_FOTO_COL_MAX = 170;
 const DESKTOP_FOTO_COL_WIDTH = `${DESKTOP_FOTO_COL_MIN}px`;
+const DESKTOP_ACTION_COL_WIDTH = 42;
 const CAPTURE_WIDTH = 1560;
 const CAPTURE_SIDE_PADDING = 80;
 
@@ -743,7 +744,7 @@ export const ScheduleDashboard: React.FC<{
 
   const renderScheduleTable = (captureMode: boolean) => (
     <div className={`schedule-capture-table-wrap ${captureMode ? 'bg-white' : 'bg-white rounded-2xl shadow-xl border border-gray-200 overflow-x-auto'}`}>
-      <table className="schedule-jadwal-table w-full table-fixed border-collapse text-sm">
+      <table className={`schedule-jadwal-table w-full table-fixed border-collapse ${captureMode ? 'text-sm' : 'text-[12px]'}`}>
         <colgroup>
           <col
             className="schedule-col-date"
@@ -770,39 +771,39 @@ export const ScheduleDashboard: React.FC<{
             className="schedule-col-foto"
             style={{ width: DESKTOP_FOTO_COL_WIDTH, minWidth: DESKTOP_FOTO_COL_MIN, maxWidth: DESKTOP_FOTO_COL_MAX }}
           />
-          {!captureMode && <col style={{ width: 48 }} />}
+          {!captureMode && <col style={{ width: DESKTOP_ACTION_COL_WIDTH }} />}
         </colgroup>
         <thead>
           <tr className="bg-[#99f6e4] border border-slate-800 text-slate-900">
             <th
               rowSpan={2}
-              className="schedule-col-date-header p-3 border border-slate-800 font-bold text-center"
+              className={`schedule-col-date-header border border-slate-800 font-bold text-center ${captureMode ? 'p-3' : 'p-2 text-[12px]'}`}
               style={{ width: DESKTOP_DATE_COL_WIDTH, minWidth: DESKTOP_DATE_COL_MIN, maxWidth: DESKTOP_DATE_COL_MAX }}
             >
               Hari / Tanggal
             </th>
             <th
               rowSpan={2}
-              className="schedule-col-time-header p-3 border border-slate-800 font-bold text-center whitespace-nowrap"
+              className={`schedule-col-time-header border border-slate-800 font-bold text-center whitespace-nowrap ${captureMode ? 'p-3' : 'p-2 text-[12px]'}`}
               style={{ width: captureMode ? CAPTURE_TIME_COL_WIDTH : DESKTOP_TIME_COL_WIDTH }}
             >
               Misa / Waktu
             </th>
-            <th colSpan={4} className="p-2 border border-slate-800 font-bold text-center">Multimedia</th>
+            <th colSpan={4} className={`border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[12px]'}`}>Multimedia</th>
             <th
               rowSpan={2}
-              className="schedule-col-foto-header p-2 border border-slate-800 font-bold text-center"
+              className={`schedule-col-foto-header border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[12px]'}`}
               style={{ width: DESKTOP_FOTO_COL_WIDTH, minWidth: DESKTOP_FOTO_COL_MIN, maxWidth: DESKTOP_FOTO_COL_MAX }}
             >
               Foto
             </th>
-            {!captureMode && <th rowSpan={2} className="p-2 border border-slate-800 w-[48px]"></th>}
+            {!captureMode && <th rowSpan={2} className="p-1.5 border border-slate-800" style={{ width: DESKTOP_ACTION_COL_WIDTH }}></th>}
           </tr>
           <tr className="bg-[#99f6e4] border border-slate-800 text-slate-900">
-            <th className="p-2 border border-slate-800 font-bold text-center">OBS</th>
-            <th className="p-2 border border-slate-800 font-bold text-center">Sound</th>
-            <th className="p-2 border border-slate-800 font-bold text-center">Camcorder 1</th>
-            <th className="p-2 border border-slate-800 font-bold text-center">Camcorder 2</th>
+            <th className={`border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[11px]'}`}>OBS</th>
+            <th className={`border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[11px]'}`}>Sound</th>
+            <th className={`border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[11px]'}`}>Camcorder 1</th>
+            <th className={`border border-slate-800 font-bold text-center ${captureMode ? 'p-2' : 'p-1.5 text-[11px]'}`}>Camcorder 2</th>
           </tr>
         </thead>
         <tbody>
@@ -837,11 +838,11 @@ export const ScheduleDashboard: React.FC<{
                   {isFirstOfGroup && (
                     <td
                       rowSpan={groupRowSpanMap[idx]}
-                      className={`schedule-col-date-cell p-3 text-center align-middle bg-white ${borderClass} ${dateCellClass}`}
+                      className={`schedule-col-date-cell ${captureMode ? 'p-3' : 'p-2'} text-center align-middle bg-white ${borderClass} ${dateCellClass}`}
                       style={{ width: DESKTOP_DATE_COL_WIDTH, minWidth: DESKTOP_DATE_COL_MIN, maxWidth: DESKTOP_DATE_COL_MAX }}
                     >
                       <div className="flex flex-col items-center w-full">
-                        <span className={`${captureMode ? 'font-bold text-[18px] mb-0.5' : 'uppercase text-xs mb-1'}`}>
+                        <span className={`${captureMode ? 'font-bold text-[18px] mb-0.5' : 'uppercase text-[11px] mb-0.5'}`}>
                           {format(new Date(row.event.date), 'EEEE', { locale: id })}
                         </span>
                         <span className={`${captureMode ? 'font-bold text-base mb-1' : ''}`}>
@@ -849,7 +850,7 @@ export const ScheduleDashboard: React.FC<{
                         </span>
 
                         {row.event.name && (
-                          <span className={`${captureMode ? 'text-[14px] font-normal text-slate-800 max-w-full' : 'text-[10px] text-indigo-600 bg-indigo-50 px-2 py-1 rounded mt-2 font-black uppercase max-w-full'} text-center leading-snug whitespace-normal break-words`}>
+                          <span className={`${captureMode ? 'text-[14px] font-normal text-slate-800 max-w-full' : 'text-[9px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded mt-1.5 font-black uppercase max-w-full'} text-center leading-snug whitespace-normal break-words`}>
                             {renderEventName(row.event.name, captureMode ? 'font-normal' : 'font-black')}
                           </span>
                         )}
@@ -857,16 +858,16 @@ export const ScheduleDashboard: React.FC<{
                     </td>
                   )}
 
-                  <td className={`p-3 text-center align-middle bg-white ${borderClass} group/row`}>
-                    <div className={`${captureMode ? 'text-base font-normal text-slate-700' : 'text-xs font-black text-slate-600 uppercase mb-0.5'}`}>
+                  <td className={`${captureMode ? 'p-3' : 'p-2'} text-center align-middle bg-white ${borderClass} group/row`}>
+                    <div className={`${captureMode ? 'text-base font-normal text-slate-700' : 'text-[10px] font-black text-slate-600 uppercase mb-0.5'}`}>
                       {toRoman(row.event.number)}
                     </div>
-                    <div className={`${captureMode ? 'text-[18px]' : 'text-base'} font-bold text-slate-900`}>
+                    <div className={`${captureMode ? 'text-[18px]' : 'text-[14px]'} font-bold text-slate-900`}>
                       {row.event.time}
                     </div>
                   </td>
 
-                  <td className={`p-2 align-middle text-center ${borderClass} ${!reqOBS ? 'bg-gray-100' : 'bg-white'}`}>
+                  <td className={`${captureMode ? 'p-2' : 'p-1.5'} align-middle text-center ${borderClass} ${!reqOBS ? 'bg-gray-100' : 'bg-white'}`}>
                     {reqOBS ? (
                       <CellSelector
                         row={row}
@@ -882,7 +883,7 @@ export const ScheduleDashboard: React.FC<{
                     ) : <span className="text-gray-400">-</span>}
                   </td>
 
-                  <td className={`p-2 align-middle text-center ${borderClass} ${!reqSound ? 'bg-gray-100' : 'bg-white'}`}>
+                  <td className={`${captureMode ? 'p-2' : 'p-1.5'} align-middle text-center ${borderClass} ${!reqSound ? 'bg-gray-100' : 'bg-white'}`}>
                     {reqSound ? (
                       <CellSelector
                         row={row}
@@ -898,7 +899,7 @@ export const ScheduleDashboard: React.FC<{
                     ) : <span className="text-gray-400">-</span>}
                   </td>
 
-                  <td className={`p-2 align-middle text-center ${borderClass} ${!reqCam1 ? 'bg-gray-100' : 'bg-white'}`}>
+                  <td className={`${captureMode ? 'p-2' : 'p-1.5'} align-middle text-center ${borderClass} ${!reqCam1 ? 'bg-gray-100' : 'bg-white'}`}>
                     {reqCam1 ? (
                       <CellSelector
                         row={row}
@@ -914,7 +915,7 @@ export const ScheduleDashboard: React.FC<{
                     ) : <span className="text-gray-400">-</span>}
                   </td>
 
-                  <td className={`p-2 align-middle text-center ${borderClass} ${!row.event.isBigMass ? 'bg-gray-100' : 'bg-white'}`}>
+                  <td className={`${captureMode ? 'p-2' : 'p-1.5'} align-middle text-center ${borderClass} ${!row.event.isBigMass ? 'bg-gray-100' : 'bg-white'}`}>
                     {row.event.isBigMass ? (
                       <CellSelector
                         row={row}
@@ -931,7 +932,7 @@ export const ScheduleDashboard: React.FC<{
                   </td>
 
                   <td
-                    className={`schedule-col-foto-cell p-1 align-middle text-center ${borderClass} ${!row.event.needsPhoto ? 'bg-gray-100' : 'bg-white'}`}
+                    className={`schedule-col-foto-cell ${captureMode ? 'p-1' : 'p-1.5'} align-middle text-center ${borderClass} ${!row.event.needsPhoto ? 'bg-gray-100' : 'bg-white'}`}
                     style={{ width: DESKTOP_FOTO_COL_WIDTH, minWidth: DESKTOP_FOTO_COL_MIN, maxWidth: DESKTOP_FOTO_COL_MAX }}
                   >
                     {row.event.needsPhoto ? (
@@ -950,13 +951,13 @@ export const ScheduleDashboard: React.FC<{
                   </td>
 
                   {!captureMode && !readOnly && canGenerate && (
-                    <td className="p-2 text-center align-middle border-b border-r border-slate-200 bg-white">
+                    <td className="p-1 text-center align-middle border-b border-r border-slate-200 bg-white">
                       <button
                         onClick={() => handleRowGenerate(row.event.id)}
                         className="p-2 text-slate-300 hover:text-indigo-600 transition-all active:scale-90"
                         title="Generate Misa Ini"
                       >
-                        <Wand2 size={18} />
+                        <Wand2 size={14} />
                       </button>
                     </td>
                   )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Users, Home, Sparkles, Camera } from 'lucide-react';
+import { Calendar, Users, Home, Sparkles, Camera, Shield } from 'lucide-react';
 import { AppPageKey } from '../types';
 
 interface NavbarProps {
@@ -16,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setTab, isViewer = f
     { id: 'inspiration', icon: Sparkles, label: 'Inspirasi' },
     { id: 'volunteers', icon: Users, label: 'Petugas' },
     { id: 'foto', icon: Camera, label: 'Foto' },
+    { id: 'admin', icon: Shield, label: 'Admin' },
   ];
 
   const navItems = pageAccess

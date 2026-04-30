@@ -24,7 +24,7 @@ import {
   ROLE_PAGE_DEFINITIONS,
   UserRoleDefinition
 } from '../types';
-import { db, ensureFirebaseAuth, logActivity } from './firebase';
+import { db, ensureFirebaseAuth, getCurrentUserEmail, logActivity } from './firebase';
 
 interface AppDB extends DBSchema {
   volunteers: {
@@ -55,9 +55,19 @@ const COLLECTIONS = {
   roles: 'roles'
 } as const;
 
-const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com', 'chayania.farista@gmail.com'];
-
+const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com'];
 const isSuperAdminEmail = (email: string) => SUPER_ADMIN_EMAILS.includes(String(email || '').toLowerCase());
+const LEGACY_ADMIN_ACTION_KEYS = [
+  'view_user_terdaftar',
+  'edit_role_user_terdaftar',
+  'view_role',
+  'edit_role',
+  'delete_role',
+  'tambah_role',
+  'view_data_keamanan',
+  'backup_data',
+  'restore_data'
+];
 
 const buildActions = (value: boolean, pageKey: AppPageKey) => {
   const def = ROLE_PAGE_DEFINITIONS.find(p => p.key === pageKey);
@@ -73,7 +83,8 @@ const buildPages = (enabledByDefault: boolean) => ({
   calendar: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'calendar') },
   inspiration: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'inspiration') },
   volunteers: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'volunteers') },
-  foto: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'foto') }
+  foto: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'foto') },
+  admin: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'admin') }
 }) as UserRoleDefinition['pages'];
 
 const normalizeRole = (role: any): UserRoleDefinition => {
@@ -291,6 +302,47 @@ const getCloudSnapshot = async () => {
 };
 
 export const dbService = {
+  async migrateLegacyAdminPermissionsToAdminPage() {
+    if (!db) return;
+    await ensureFirebaseAuth();
+    const snapshot = await getDocs(collection(db, COLLECTIONS.roles));
+
+    for (const roleDoc of snapshot.docs) {
+      const normalized = normalizeRole(roleDoc.data());
+      const volunteerActions = normalized.pages.volunteers?.actions || {};
+      const adminActions = normalized.pages.admin?.actions || {};
+
+      const hasLegacyAdminPermission = LEGACY_ADMIN_ACTION_KEYS.some((key) => !!volunteerActions[key]);
+      const adminAlreadyConfigured = LEGACY_ADMIN_ACTION_KEYS.some((key) => !!adminActions[key]);
+      if (!hasLegacyAdminPermission || adminAlreadyConfigured) continue;
+
+      const nextRole: UserRoleDefinition = {
+        ...normalized,
+        pages: {
+          ...normalized.pages,
+          admin: {
+            enabled: normalized.pages.admin?.enabled || hasLegacyAdminPermission,
+            actions: {
+              ...normalized.pages.admin.actions,
+              ...Object.fromEntries(
+                LEGACY_ADMIN_ACTION_KEYS.map((key) => [key, !!volunteerActions[key]])
+              )
+            }
+          }
+        }
+      };
+
+      await setDoc(
+        doc(db, COLLECTIONS.roles, nextRole.name.toLowerCase()),
+        {
+          ...nextRole,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+  },
+
   async getAllRoles(): Promise<UserRoleDefinition[]> {
     if (!db) return [];
     await ensureFirebaseAuth();
@@ -325,6 +377,10 @@ export const dbService = {
     await assertWriteAccess();
     if (!db) return;
     const emailLower = email.toLowerCase();
+    const actorEmail = getCurrentUserEmail().toLowerCase();
+    if (isSuperAdminEmail(emailLower) && !isSuperAdminEmail(actorEmail)) {
+      throw new Error('FORBIDDEN_SUPER_ADMIN_UPDATE');
+    }
     await setDoc(
       doc(db, COLLECTIONS.users, emailLower),
       {
@@ -342,11 +398,12 @@ export const dbService = {
       calendar: false,
       inspiration: false,
       volunteers: false,
-      foto: false
+      foto: false,
+      admin: false
     };
     const emailLower = String(email || '').toLowerCase();
     if (isSuperAdminEmail(emailLower)) {
-      return { home: true, calendar: true, inspiration: true, volunteers: true, foto: true };
+      return { home: true, calendar: true, inspiration: true, volunteers: true, foto: true, admin: true };
     }
     if (!db || !emailLower) return fallback;
     await ensureFirebaseAuth();
@@ -360,7 +417,8 @@ export const dbService = {
       calendar: !!role.pages.calendar.enabled,
       inspiration: !!role.pages.inspiration.enabled,
       volunteers: !!role.pages.volunteers.enabled,
-      foto: !!role.pages.foto?.enabled
+      foto: !!role.pages.foto?.enabled,
+      admin: !!role.pages.admin?.enabled
     };
   },
 

@@ -3,6 +3,50 @@ import { Camera, Upload, Trash2, Loader2, Image as ImageIcon, X, Sparkles, Downl
 import { motion, AnimatePresence } from 'framer-motion';
 import { showAlert } from '../services/alertService';
 
+// New Panel Component
+const Panel: React.FC<{
+  id: string;
+  title: string;
+  icon: React.ReactNode;
+  openPanel: string | null;
+  setOpenPanel: (id: string | null) => void;
+  children: React.ReactNode;
+}> = ({ id, title, icon, openPanel, setOpenPanel, children }) => {
+  const isOpen = openPanel === id;
+  return (
+    <div className="border-b border-gray-100">
+      <button
+        onClick={() => setOpenPanel(isOpen ? null : id)}
+        className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          {icon}
+          <span className="font-bold text-sm text-gray-700">{title}</span>
+        </div>
+        <ChevronRight
+          size={18}
+          className={`text-gray-400 transition-transform ${
+            isOpen ? 'rotate-90' : 'rotate-0'
+          }`}
+        />
+      </button>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="p-4 pt-0">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 interface PhotoPreview {
   id: string;
   originalUrl: string;
@@ -14,6 +58,12 @@ interface PhotoPreview {
     description?: string;
     tags?: string;
   };
+}
+
+interface SelectedFile {
+  id: string;
+  fileData: string;
+  name: string;
 }
 
 type ColorizeStyle = 'warm' | 'cool' | 'vintage' | 'vivid' | 'bw' | 'ocean' | 'sunset' | 'forest' | 'art' | 'sketch' | 'oil_painting' | 'pop_art';
@@ -35,11 +85,25 @@ const RELIGHTING_DIRECTIONS: RelightingDir[] = [
 ];
 
 const MAX_PREVIEW_SIZE = 1200; // Ukuran untuk preview agar lancar
+const DEFAULT_WATERMARK_POSITION: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center' | 'bottom-center' | 'top-center' = 'bottom-center';
+const DEFAULT_WATERMARK_SIZE = 0.15;
 
 export const FotoManager: React.FC<{
   canView?: boolean;
+  canUpload?: boolean;
+  canSave?: boolean;
+  canDelete?: boolean;
+  canEditSettings?: boolean;
+  canResetSettings?: boolean;
+  canReorder?: boolean;
 }> = ({
   canView = true,
+  canUpload = true,
+  canSave = true,
+  canDelete = true,
+  canEditSettings = true,
+  canResetSettings = true,
+  canReorder = true,
 }) => {
   // Desktop state
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
@@ -52,14 +116,24 @@ export const FotoManager: React.FC<{
   }, []);
 
   // File selection and preview (Don't load files from localStorage anymore to avoid crash)
-  const [selectedFiles, setSelectedFiles] = useState<{fileData: string, name: string}[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [processedPreviews, setProcessedPreviews] = useState<PhotoPreview[]>([]);
   const [processingPreviews, setProcessingPreviews] = useState(false);
 
   // Tool selection state
   const [activeTab, setActiveTab] = useState<'adjust' | 'filter' | 'watermark' | 'relight' | 'ai'>('watermark');
+  const [openPanel, setOpenPanel] = useState<string | null>('watermark');
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
+  const [desktopZoom, setDesktopZoom] = useState(1);
+  const [desktopPan, setDesktopPan] = useState({ x: 0, y: 0 });
+  const [isDesktopPanning, setIsDesktopPanning] = useState(false);
+  const [draggedPhotoIndex, setDraggedPhotoIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const desktopPreviewRef = useRef<HTMLDivElement>(null);
+  const zoomHoldIntervalRef = useRef<number | null>(null);
+  const processingRunRef = useRef(0);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const panOriginRef = useRef({ x: 0, y: 0 });
 
   // Persistence Helper
   const getSaved = (key: string, def: any) => {
@@ -78,9 +152,9 @@ export const FotoManager: React.FC<{
   // Watermark state
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(() => getSaved('watermark_enabled', true));
   const [watermarkUrl, setWatermarkUrl] = useState<string | null>(() => getSaved('watermark_url', '/watermark.png'));
-  const [watermarkPosition, setWatermarkPosition] = useState<'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center' | 'bottom-center' | 'top-center'>(() => getSaved('watermark_pos', 'bottom-center'));
+  const [watermarkPosition, setWatermarkPosition] = useState<'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center' | 'bottom-center' | 'top-center'>(() => getSaved('watermark_pos', DEFAULT_WATERMARK_POSITION));
   const [watermarkOpacity, setWatermarkOpacity] = useState(() => getSaved('watermark_opacity', 0));
-  const [watermarkSize, setWatermarkSize] = useState(() => getSaved('watermark_size', 0.20));
+  const [watermarkSize, setWatermarkSize] = useState(() => getSaved('watermark_size', DEFAULT_WATERMARK_SIZE));
 
   // Filter state
   const [filterBrightness, setFilterBrightness] = useState(() => getSaved('brightness', 100));
@@ -103,8 +177,8 @@ export const FotoManager: React.FC<{
 
   // Relighting state
   const [relightDirs, setRelightDirs] = useState<string[]>(() => getSaved('relight_dirs', []));
-  const [relightIntensity, setRelightIntensity] = useState(() => getSaved('relight_intensity', 50));
-  const [relightWarmth, setRelightWarmth] = useState(() => getSaved('relight_warmth', 30));
+  const [relightIntensity, setRelightIntensity] = useState(() => getSaved('relight_intensity', 0));
+  const [relightWarmth, setRelightWarmth] = useState(() => getSaved('relight_warmth', 0));
 
   // Save settings when changed (EXCLUDE files to prevent QuotaExceededError/Blank Page)
   useEffect(() => {
@@ -166,15 +240,26 @@ export const FotoManager: React.FC<{
   const resetWatermark = () => {
     setWatermarkEnabled(true);
     setWatermarkUrl('/watermark.png');
-    setWatermarkPosition('bottom-center');
+    setWatermarkPosition(DEFAULT_WATERMARK_POSITION);
     setWatermarkOpacity(0);
-    setWatermarkSize(0.20);
+    setWatermarkSize(DEFAULT_WATERMARK_SIZE);
   };
+
+  useEffect(() => {
+    // Saat halaman masih bersih (belum ada foto), gunakan default reset watermark.
+    if (selectedFiles.length === 0) {
+      setWatermarkEnabled(true);
+      setWatermarkUrl('/watermark.png');
+      setWatermarkPosition(DEFAULT_WATERMARK_POSITION);
+      setWatermarkOpacity(0);
+      setWatermarkSize(DEFAULT_WATERMARK_SIZE);
+    }
+  }, [selectedFiles.length]);
 
   const resetRelight = () => {
     setRelightDirs([]);
-    setRelightIntensity(50);
-    setRelightWarmth(30);
+    setRelightIntensity(0);
+    setRelightWarmth(0);
   };
 
   const resetAI = () => {
@@ -401,16 +486,18 @@ export const FotoManager: React.FC<{
           
           let x = 0, y = 0;
           const paddingX = minSide * 0.04;
-          const paddingY = minSide * 0.02; // Kurangi padding default untuk geser lebih ke tepi atas/bawah
+          const paddingY = minSide * 0.02;
+          const topNudge = minSide * 0.04; // Geser sedikit lebih ke atas untuk semua posisi atas
+          const bottomNudge = minSide * 0.04; // Geser sedikit lebih ke bawah untuk semua posisi bawah
           
           switch (watermarkPosition) {
-            case 'bottom-right': x = canvas.width - wWidth - paddingX; y = canvas.height - wHeight - paddingY; break;
-            case 'bottom-left': x = paddingX; y = canvas.height - wHeight - paddingY; break;
-            case 'top-right': x = canvas.width - wWidth - paddingX; y = paddingY; break;
-            case 'top-left': x = paddingX; y = paddingY; break;
+            case 'bottom-right': x = canvas.width - wWidth - paddingX; y = canvas.height - wHeight - paddingY + bottomNudge; break;
+            case 'bottom-left': x = paddingX; y = canvas.height - wHeight - paddingY + bottomNudge; break;
+            case 'top-right': x = canvas.width - wWidth - paddingX; y = paddingY - topNudge; break;
+            case 'top-left': x = paddingX; y = paddingY - topNudge; break;
             case 'center': x = (canvas.width - wWidth) / 2; y = (canvas.height - wHeight) / 2; break;
-            case 'bottom-center': x = (canvas.width - wWidth) / 2; y = canvas.height - wHeight - paddingY; break;
-            case 'top-center': x = (canvas.width - wWidth) / 2; y = paddingY; break;
+            case 'bottom-center': x = (canvas.width - wWidth) / 2; y = canvas.height - wHeight - paddingY + bottomNudge; break;
+            case 'top-center': x = (canvas.width - wWidth) / 2; y = paddingY - topNudge; break;
           }
 
           // Ensure watermark stays within canvas bounds
@@ -430,33 +517,40 @@ export const FotoManager: React.FC<{
     });
   }, [watermarkEnabled, watermarkPosition, watermarkSize, watermarkOpacity, filterBrightness, filterContrast, filterSaturate, filterGrayscale, filterSepia, filterSmooth, filterSkinBright, filterSkinTone, filterSharpness, filterSkyColor, filterSkyIntensity, filterSkyBrightness, skyColorEnabled, colorizeStyle, colorizeIntensity, relightDirs, relightIntensity, relightWarmth]);
 
-  const processFiles = async (items: {fileData: string, name: string}[]) => {
+  const processFiles = async (items: SelectedFile[], append = false, runId?: number) => {
     if (items.length === 0) {
-      setProcessedPreviews([]);
+      if (!append) setProcessedPreviews([]);
       return;
     }
     
-    // Reset previews and start processing
-    setProcessedPreviews([]);
+    // Saat edit massal, jangan reset preview lama agar UI tidak blank/refresh.
     setProcessingPreviews(true);
 
     try {
       for (let i = 0; i < items.length; i++) {
+        if (runId !== undefined && runId !== processingRunRef.current) return;
         const item = items[i];
         try {
           const finalUrl = await applyEffects(item.fileData, watermarkUrl, MAX_PREVIEW_SIZE);
           const newPreview = { 
-            id: `${item.name}-${i}-${Date.now()}`, // Unique ID
+            id: item.id,
             originalUrl: item.fileData, 
             previewUrl: finalUrl, 
             title: item.name 
           };
           
-          // Update previews incrementally so user sees progress
-          setProcessedPreviews(prev => [...prev, newPreview]);
+          if (append) {
+            setProcessedPreviews(prev => [...prev, newPreview]);
+          } else {
+            setProcessedPreviews(prev => {
+              const next = [...prev];
+              next[i] = newPreview;
+              return next;
+            });
+          }
           
           // Small delay to allow UI thread to breathe and prevent blank screen/freeze
-          await new Promise(resolve => setTimeout(resolve, 50));
+          await new Promise(resolve => setTimeout(resolve, 25));
         } catch (innerErr) {
           console.error("Processing error:", innerErr);
         }
@@ -470,17 +564,26 @@ export const FotoManager: React.FC<{
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (selectedFiles.length > 0) processFiles(selectedFiles);
-    }, 150);
+      if (selectedFiles.length === 0) {
+        setProcessedPreviews([]);
+        return;
+      }
+      const runId = Date.now();
+      processingRunRef.current = runId;
+      processFiles(selectedFiles, false, runId);
+    }, 280);
     return () => clearTimeout(timer);
-  }, [selectedFiles, watermarkEnabled, watermarkUrl, watermarkPosition, watermarkOpacity, watermarkSize, filterBrightness, filterContrast, filterSaturate, filterGrayscale, filterSepia, filterSmooth, filterSkinBright, filterSkinTone, filterSharpness, filterSkyColor, filterSkyIntensity, filterSkyBrightness, skyColorEnabled, colorizeStyle, colorizeIntensity, relightDirs, relightIntensity, relightWarmth]);
+  }, [watermarkEnabled, watermarkUrl, watermarkPosition, watermarkOpacity, watermarkSize, filterBrightness, filterContrast, filterSaturate, filterGrayscale, filterSepia, filterSmooth, filterSkinBright, filterSkinTone, filterSharpness, filterSkyColor, filterSkyIntensity, filterSkyBrightness, skyColorEnabled, colorizeStyle, colorizeIntensity, relightDirs, relightIntensity, relightWarmth]);
 
-  const handleFileSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  const handleIncomingFiles = async (files: File[]) => {
+    if (!canUpload) {
+      showAlert('Role Anda tidak memiliki izin upload foto.', 'info');
+      return;
+    }
     if (files.length === 0) return;
     
     setProcessingPreviews(true);
-    const newItems: {fileData: string, name: string}[] = [];
+    const newItems: SelectedFile[] = [];
     
     for (const file of files) {
       // Basic check for very large files (> 15MB) to prevent crash
@@ -493,17 +596,51 @@ export const FotoManager: React.FC<{
         reader.onload = (ev) => resolve(ev.target?.result as string);
         reader.readAsDataURL(file);
       });
-      newItems.push({ fileData: base64, name: file.name });
+      newItems.push({ id: `${Date.now()}-${Math.random()}-${file.name}`, fileData: base64, name: file.name });
     }
     
-    setSelectedFiles(prev => [...prev, ...newItems]);
-    if (newItems.length > 0 && isDesktop) {
-      setActivePreviewIndex(selectedFiles.length); // Switch to the first newly added photo
-    }
+    setSelectedFiles(prev => {
+      const firstNewIndex = prev.length;
+      const merged = [...prev, ...newItems];
+      if (newItems.length > 0 && isDesktop) {
+        setActivePreviewIndex(firstNewIndex);
+        setDesktopZoom(1);
+      }
+      return merged;
+    });
+    await processFiles(newItems, true);
+  };
+
+  const handleFileSelection = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    await handleIncomingFiles(files);
     if (e.target) e.target.value = '';
   };
 
+  const moveItem = <T,>(arr: T[], from: number, to: number): T[] => {
+    const next = [...arr];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  };
+
+  const handlePhotoDropReorder = (dropIndex: number) => {
+    if (!canReorder) return;
+    if (draggedPhotoIndex === null || draggedPhotoIndex === dropIndex) {
+      setDraggedPhotoIndex(null);
+      return;
+    }
+    setSelectedFiles(prev => moveItem(prev, draggedPhotoIndex, dropIndex));
+    setProcessedPreviews(prev => moveItem(prev, draggedPhotoIndex, dropIndex));
+    setActivePreviewIndex(dropIndex);
+    setDraggedPhotoIndex(null);
+  };
+
   const handleDownloadSingle = async (index: number) => {
+    if (!canSave) {
+      showAlert('Role Anda tidak memiliki izin simpan foto.', 'info');
+      return;
+    }
     const item = selectedFiles[index];
     if (!item) return;
     
@@ -523,6 +660,10 @@ export const FotoManager: React.FC<{
   };
 
   const handleDownloadAll = async () => {
+    if (!canSave) {
+      showAlert('Role Anda tidak memiliki izin simpan foto.', 'info');
+      return;
+    }
     showAlert('Menyiapkan semua foto...', 'info');
     for (let i = 0; i < selectedFiles.length; i++) {
       const item = selectedFiles[i];
@@ -542,7 +683,24 @@ export const FotoManager: React.FC<{
     showAlert(`Berhasil mendownload ${selectedFiles.length} foto`, 'success');
   };
 
+  const handleResetAllSettings = () => {
+    if (!canResetSettings) {
+      showAlert('Role Anda tidak memiliki izin reset pengaturan.', 'info');
+      return;
+    }
+    resetAdjust();
+    resetAI();
+    resetFilter();
+    resetWatermark();
+    resetRelight();
+    showAlert('Semua pengaturan berhasil direset', 'success');
+  };
+
   const handleRemoveSpecificFile = (index: number) => {
+    if (!canDelete) {
+      showAlert('Role Anda tidak memiliki izin hapus foto.', 'info');
+      return;
+    }
     setSelectedFiles(prev => {
       const next = [...prev];
       next.splice(index, 1);
@@ -562,6 +720,129 @@ export const FotoManager: React.FC<{
     setActivePhotoId(null);
   };
 
+  const handleDesktopPrev = () => {
+    setActivePreviewIndex((prev) => {
+      if (processedPreviews.length === 0) return 0;
+      return prev === 0 ? processedPreviews.length - 1 : prev - 1;
+    });
+    setDesktopZoom(1);
+    setDesktopPan({ x: 0, y: 0 });
+  };
+
+  const handleDesktopNext = () => {
+    setActivePreviewIndex((prev) => {
+      if (processedPreviews.length === 0) return 0;
+      return prev === processedPreviews.length - 1 ? 0 : prev + 1;
+    });
+    setDesktopZoom(1);
+    setDesktopPan({ x: 0, y: 0 });
+  };
+
+  const handleDesktopZoomIn = () => {
+    setDesktopZoom((prev) => Math.min(prev + 0.2, 3));
+  };
+
+  const handleDesktopZoomOut = () => {
+    setDesktopZoom((prev) => Math.max(prev - 0.2, 0.6));
+  };
+
+  const handleDesktopFullscreen = async () => {
+    if (!desktopPreviewRef.current) return;
+    if (!document.fullscreenElement) {
+      await desktopPreviewRef.current.requestFullscreen();
+      return;
+    }
+    await document.exitFullscreen();
+  };
+
+  const handleDesktopPanStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!currentDesktopPreview) return;
+    e.preventDefault();
+    panStartRef.current = { x: e.clientX, y: e.clientY };
+    panOriginRef.current = { ...desktopPan };
+    setIsDesktopPanning(true);
+  };
+
+  const getPanBounds = () => {
+    const rect = desktopPreviewRef.current?.getBoundingClientRect();
+    if (!rect) return { maxX: 0, maxY: 0 };
+    const maxX = Math.max(0, (rect.width * (desktopZoom - 1)) / 2);
+    const maxY = Math.max(0, (rect.height * (desktopZoom - 1)) / 2);
+    return { maxX, maxY };
+  };
+
+  const clampPan = (x: number, y: number) => {
+    const { maxX, maxY } = getPanBounds();
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  };
+
+  const startDesktopZoomHold = (direction: 'in' | 'out') => {
+    if (zoomHoldIntervalRef.current !== null) {
+      window.clearInterval(zoomHoldIntervalRef.current);
+    }
+    if (direction === 'in') handleDesktopZoomIn();
+    if (direction === 'out') handleDesktopZoomOut();
+    zoomHoldIntervalRef.current = window.setInterval(() => {
+      if (direction === 'in') handleDesktopZoomIn();
+      if (direction === 'out') handleDesktopZoomOut();
+    }, 90);
+  };
+
+  const stopDesktopZoomHold = () => {
+    if (zoomHoldIntervalRef.current !== null) {
+      window.clearInterval(zoomHoldIntervalRef.current);
+      zoomHoldIntervalRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (processedPreviews.length === 0) {
+      setActivePreviewIndex(0);
+      return;
+    }
+    if (activePreviewIndex > processedPreviews.length - 1) {
+      setActivePreviewIndex(processedPreviews.length - 1);
+    }
+  }, [processedPreviews.length, activePreviewIndex]);
+
+  useEffect(() => {
+    return () => stopDesktopZoomHold();
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktopPanning) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      const nextPan = clampPan(panOriginRef.current.x + dx, panOriginRef.current.y + dy);
+      setDesktopPan(nextPan);
+    };
+    const handleMouseUp = () => setIsDesktopPanning(false);
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDesktopPanning]);
+
+  useEffect(() => {
+    setDesktopPan({ x: 0, y: 0 });
+  }, [activePreviewIndex]);
+
+  useEffect(() => {
+    setDesktopPan((prev) => {
+      if (desktopZoom <= 1) return { x: 0, y: 0 };
+      return clampPan(prev.x, prev.y);
+    });
+  }, [desktopZoom]);
+
+  const currentDesktopPreview = processedPreviews[activePreviewIndex] ?? processedPreviews[0] ?? null;
+
   if (!canView) return <div className="flex flex-col items-center justify-center py-20 px-4"><AlertCircle className="text-red-500 mb-4" size={40} /><h3 className="font-semibold text-gray-700">Akses Dibatasi</h3></div>;
 
   if (isDesktop) {
@@ -576,7 +857,8 @@ export const FotoManager: React.FC<{
                 </div>
                 <button 
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                  disabled={!canUpload}
+                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Plus size={18} className="text-gray-400" />
                 </button>
@@ -585,6 +867,11 @@ export const FotoManager: React.FC<{
                 {processedPreviews.map((preview, idx) => (
                   <div 
                     key={preview.id}
+                    draggable={canReorder}
+                    onDragStart={() => setDraggedPhotoIndex(idx)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handlePhotoDropReorder(idx)}
+                    onDragEnd={() => setDraggedPhotoIndex(null)}
                     onClick={() => setActivePreviewIndex(idx)}
                     className={`flex items-center gap-3 p-2 rounded-xl border transition-all cursor-pointer ${
                       activePreviewIndex === idx ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-100 hover:border-gray-200'
@@ -599,13 +886,15 @@ export const FotoManager: React.FC<{
                     <div className="flex flex-col gap-1">
                       <button 
                         onClick={(e) => { e.stopPropagation(); handleRemoveSpecificFile(idx); }}
-                        className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                        disabled={!canDelete}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Trash2 size={12} />
                       </button>
                       <button 
                         onClick={(e) => { e.stopPropagation(); handleDownloadSingle(idx); }}
-                        className="p-1 text-gray-300 hover:text-indigo-500 transition-colors"
+                        disabled={!canSave}
+                        className="p-1 text-gray-300 hover:text-indigo-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Download size={14} />
                       </button>
@@ -627,40 +916,83 @@ export const FotoManager: React.FC<{
               
               {/* Large Preview Area */}
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex items-center justify-center p-8 relative">
-                  {processedPreviews.length > 0 ? (
-                    <img 
-                      src={processedPreviews[activePreviewIndex].previewUrl} 
-                      className="max-w-full max-h-full object-contain transition-transform duration-300" 
-                      alt="Main Preview"
-                    />
+                <div
+                  ref={desktopPreviewRef}
+                  onMouseDown={handleDesktopPanStart}
+                  onWheel={(e) => {
+                    if (!currentDesktopPreview) return;
+                    e.preventDefault();
+                    if (e.deltaY < 0) {
+                      handleDesktopZoomOut();
+                    } else {
+                      handleDesktopZoomIn();
+                    }
+                  }}
+                  className={`group flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex items-center justify-center p-3 relative transition-colors ${
+                    isDesktopPanning ? 'cursor-grabbing' : 'cursor-grab'
+                  }`}
+                >
+                  {currentDesktopPreview ? (
+                    <>
+                      <img 
+                        src={currentDesktopPreview.previewUrl} 
+                        className="w-full h-full object-contain transition-transform duration-300" 
+                        style={{ transform: `translate(${desktopPan.x}px, ${desktopPan.y}px) scale(${desktopZoom})` }}
+                        draggable={false}
+                        alt="Main Preview"
+                      />
+
+                      <button
+                        onClick={handleDesktopPrev}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-black/60"
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <button
+                        onClick={handleDesktopNext}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-black/60"
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+
+                      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-2 rounded-2xl flex items-center gap-3 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onMouseDown={() => startDesktopZoomHold('out')}
+                          onMouseUp={stopDesktopZoomHold}
+                          onMouseLeave={stopDesktopZoomHold}
+                          onTouchStart={() => startDesktopZoomHold('out')}
+                          onTouchEnd={stopDesktopZoomHold}
+                          className="hover:text-indigo-300 transition-colors"
+                        >
+                          <ZoomOut size={18} />
+                        </button>
+                        <button
+                          onMouseDown={() => startDesktopZoomHold('in')}
+                          onMouseUp={stopDesktopZoomHold}
+                          onMouseLeave={stopDesktopZoomHold}
+                          onTouchStart={() => startDesktopZoomHold('in')}
+                          onTouchEnd={stopDesktopZoomHold}
+                          className="hover:text-indigo-300 transition-colors"
+                        >
+                          <ZoomIn size={18} />
+                        </button>
+                        <button onClick={handleDesktopFullscreen} className="hover:text-indigo-300 transition-colors"><Maximize size={18} /></button>
+                      </div>
+                    </>
                   ) : (
                     <div className="flex flex-col items-center gap-4 text-gray-300">
                       <ImageIcon size={64} className="opacity-20" />
                       <p className="font-medium">Pilih foto untuk mulai mengedit</p>
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="px-6 py-2 bg-indigo-600 text-white rounded-full text-sm font-bold shadow-lg shadow-indigo-100"
+                        disabled={!canUpload}
+                        className="px-6 py-2 bg-indigo-600 text-white rounded-full text-sm font-bold shadow-lg shadow-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Pilih Foto
                       </button>
                     </div>
                   )}
                 </div>
-
-                {/* Controls - Now below the image card */}
-                {processedPreviews.length > 0 && (
-                  <div className="mt-4 flex items-center justify-center">
-                    <div className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-2xl flex items-center gap-4 text-white">
-                      <button className="hover:text-indigo-400 transition-colors"><ZoomOut size={18} /></button>
-                      <button className="hover:text-indigo-400 transition-colors"><ZoomIn size={18} /></button>
-                      <button className="hover:text-indigo-400 transition-colors"><Plus size={18} /></button>
-                      <button className="hover:text-indigo-400 transition-colors"><RotateCcw size={18} /></button>
-                      <button className="hover:text-indigo-400 transition-colors"><Maximize size={18} /></button>
-                      <button className="hover:text-indigo-400 transition-colors"><ExternalLink size={18} /></button>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Thumbnail Strip (Moved here from Right Sidebar) */}
@@ -681,168 +1013,46 @@ export const FotoManager: React.FC<{
 
             {/* Right Tools Sidebar */}
             <div className="w-[380px] bg-white rounded-3xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
-                {/* Category Tabs */}
-                <div className="flex-none flex overflow-x-auto no-scrollbar bg-gray-50/50 p-2 gap-2 border-b border-gray-50">
-                  {(['watermark', 'adjust', 'ai', 'filter', 'relight'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`whitespace-nowrap px-4 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
-                        activeTab === tab ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-500'
-                      }`}
+                {/* Top Action Buttons */}
+                <div className="p-4 border-b border-gray-100 flex gap-3 bg-gray-50/30">
+                  <button 
+                    onClick={handleDownloadAll}
+                    disabled={!canSave || selectedFiles.length === 0}
+                    className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-bold text-[13px] shadow-lg shadow-indigo-100 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Simpan Semua
+                  </button>
+                  <div className="flex-1 flex flex-col gap-1.5">
+                    <button 
+                      onClick={() => { 
+                        if (confirm('Hapus semua foto?')) {
+                          setSelectedFiles([]); 
+                          setProcessedPreviews([]); 
+                          resetAdjust();
+                          resetFilter();
+                          resetWatermark();
+                          resetRelight();
+                        }
+                      }}
+                      disabled={!canDelete || selectedFiles.length === 0}
+                      className="w-full bg-red-500 text-white py-2.5 rounded-xl font-bold text-[13px] shadow-lg shadow-red-100 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {tab === 'watermark' ? 'Watermark' : tab === 'adjust' ? 'Penyesuaian' : tab === 'ai' ? 'AI' : tab === 'filter' ? 'Filter' : 'Pencahayaan'}
+                      Hapus Semua
                     </button>
-                  ))}
+                    <button
+                      onClick={handleResetAllSettings}
+                      disabled={!canResetSettings}
+                      className="w-full py-1.5 bg-gray-100 text-gray-600 rounded-lg font-bold text-[10px] border border-gray-200 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Reset semua pengaturan"
+                    >
+                      Reset Setting
+                    </button>
+                  </div>
                 </div>
 
-                {/* Settings Content */}
-                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                  {activeTab === 'adjust' && (
-                    <div className="space-y-4 pb-4">
-                      {[
-                        { label: 'Kecerahan', val: filterBrightness, set: setFilterBrightness, max: 200 },
-                        { label: 'Kontras', val: filterContrast, set: setFilterContrast, max: 200 },
-                        { label: 'Saturasi', val: filterSaturate, set: setFilterSaturate, max: 200 },
-                        { label: 'Grayscale', val: filterGrayscale, set: setFilterGrayscale, max: 100 },
-                        { label: 'Sepia', val: filterSepia, set: setFilterSepia, max: 100 }
-                      ].map((item) => (
-                        <div key={item.label} className="flex items-center gap-3">
-                          <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
-                          <input 
-                            type="range" min="0" max={item.max} 
-                            value={item.val} 
-                            onChange={(e) => item.set(parseInt(e.target.value))} 
-                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                          />
-                          <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{item.val}</span>
-                        </div>
-                      ))}
-                      <div className="flex justify-end pt-2">
-                        <button onClick={resetAdjust} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                          <RotateCcw size={12} />
-                          Reset
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'ai' && (
-                    <div className="space-y-4 pb-4">
-                      {[
-                        { label: 'Mulus', val: filterSmooth, set: setFilterSmooth, max: 100 },
-                        { label: 'Cerah', val: filterSkinBright, set: setFilterSkinBright, max: 100 },
-                        { label: 'Rata', val: filterSkinTone, set: setFilterSkinTone, max: 100 },
-                        { label: 'HD Mode', val: filterSharpness, set: setFilterSharpness, max: 100 }
-                      ].map((item) => (
-                        <div key={item.label} className="flex items-center gap-3">
-                          <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
-                          <input 
-                            type="range" min="0" max={item.max} 
-                            value={item.val} 
-                            onChange={(e) => item.set(parseInt(e.target.value))} 
-                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                          />
-                          <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{item.val}</span>
-                        </div>
-                      ))}
-
-                      {/* Sky Color Control */}
-                      <div className="flex flex-col gap-3 pt-2 border-t border-gray-50">
-                        <div className="flex items-center gap-3">
-                          <div className="w-24 shrink-0 flex items-center gap-2">
-                            <input 
-                              type="checkbox" 
-                              checked={skyColorEnabled} 
-                              onChange={(e) => setSkyColorEnabled(e.target.checked)}
-                              className="w-4 h-4 accent-indigo-600"
-                            />
-                            <span className="text-[11px] font-bold text-gray-600">Warna Awan</span>
-                          </div>
-                          <div className={`flex gap-2 flex-1 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                            {['#87CEEB', '#00BFFF', '#4682B4', '#FFB6C1', '#DDA0DD', '#F0E68C'].map(color => (
-                              <button 
-                                key={color} 
-                                onClick={() => setFilterSkyColor(color)}
-                                className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${filterSkyColor === color ? 'border-indigo-600 scale-110' : 'border-transparent'}`}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                            <input 
-                              type="color" 
-                              value={filterSkyColor} 
-                              onChange={(e) => setFilterSkyColor(e.target.value)}
-                              className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer overflow-hidden rounded-full"
-                            />
-                          </div>
-                        </div>
-                        <div className={`space-y-3 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Pekat Awan</span>
-                            <input 
-                              type="range" min="0" max="100" 
-                              value={filterSkyIntensity} 
-                              onChange={(e) => setFilterSkyIntensity(parseInt(e.target.value))} 
-                              className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                            />
-                            <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{filterSkyIntensity}%</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Kecerahan Awan</span>
-                            <input 
-                              type="range" min="0" max="200" 
-                              value={filterSkyBrightness} 
-                              onChange={(e) => setFilterSkyBrightness(parseInt(e.target.value))} 
-                              className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                            />
-                            <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{filterSkyBrightness}%</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex justify-end pt-2">
-                        <button onClick={resetAI} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                          <RotateCcw size={12} />
-                          Reset
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'filter' && (
-                    <div className="space-y-4 pb-4">
-                      <div className="grid grid-cols-4 gap-2">
-                        {(['warm', 'cool', 'vintage', 'vivid', 'bw', 'ocean', 'sunset', 'forest', 'art', 'sketch', 'oil_painting', 'pop_art'] as ColorizeStyle[]).map(style => (
-                          <button 
-                            key={style} 
-                            onClick={() => setColorizeStyle(style)} 
-                            className={`py-2 rounded-xl text-[8px] font-bold capitalize transition-all border ${
-                              colorizeStyle === style ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-100'
-                            }`}
-                          >
-                            {style}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-3 pt-2 border-t border-gray-50">
-                        <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Intensitas</span>
-                        <input 
-                          type="range" min="0" max="100" 
-                          value={colorizeIntensity} 
-                          onChange={(e) => setColorizeIntensity(parseInt(e.target.value))} 
-                          className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                        />
-                        <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{colorizeIntensity}%</span>
-                      </div>
-                      <div className="flex justify-end pt-2">
-                        <button onClick={resetFilter} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                          <RotateCcw size={12} />
-                          Reset
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'watermark' && (
+                {/* Accordion Panels */}
+                <div className={`flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2 ${!canEditSettings ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Panel id="watermark" title="Watermark" icon={<Layers size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
                     <div className="space-y-5 pb-4">
                       <div className="flex items-center justify-between px-1 mb-2">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Aktifkan Watermark</span>
@@ -917,15 +1127,159 @@ export const FotoManager: React.FC<{
                         </div>
                       </div>
                       <div className="flex justify-end pt-2">
-                        <button onClick={resetWatermark} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
+                        <button onClick={resetWatermark} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                           <RotateCcw size={12} />
                           Reset
                         </button>
                       </div>
                     </div>
-                  )}
+                  </Panel>
 
-                  {activeTab === 'relight' && (
+                  <Panel id="adjust" title="Penyesuaian" icon={<Sliders size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+                    <div className="space-y-4 pb-4">
+                      {[
+                        { label: 'Kecerahan', val: filterBrightness, set: setFilterBrightness, max: 200 },
+                        { label: 'Kontras', val: filterContrast, set: setFilterContrast, max: 200 },
+                        { label: 'Saturasi', val: filterSaturate, set: setFilterSaturate, max: 200 },
+                        { label: 'Grayscale', val: filterGrayscale, set: setFilterGrayscale, max: 100 },
+                        { label: 'Sepia', val: filterSepia, set: setFilterSepia, max: 100 }
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center gap-3">
+                          <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
+                          <input 
+                            type="range" min="0" max={item.max} 
+                            value={item.val} 
+                            onChange={(e) => item.set(parseInt(e.target.value))} 
+                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                          />
+                          <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{item.val}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-end pt-2">
+                        <button onClick={resetAdjust} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                          <RotateCcw size={12} />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  </Panel>
+
+                  <Panel id="ai" title="AI" icon={<Sparkles size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+                    <div className="space-y-4 pb-4">
+                      {[
+                        { label: 'Mulus', val: filterSmooth, set: setFilterSmooth, max: 100 },
+                        { label: 'Cerah', val: filterSkinBright, set: setFilterSkinBright, max: 100 },
+                        { label: 'Rata', val: filterSkinTone, set: setFilterSkinTone, max: 100 },
+                        { label: 'HD Mode', val: filterSharpness, set: setFilterSharpness, max: 100 }
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center gap-3">
+                          <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
+                          <input 
+                            type="range" min="0" max={item.max} 
+                            value={item.val} 
+                            onChange={(e) => item.set(parseInt(e.target.value))} 
+                            className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                          />
+                          <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{item.val}</span>
+                        </div>
+                      ))}
+
+                      {/* Sky Color Control */}
+                      <div className="flex flex-col gap-3 pt-2 border-t border-gray-50">
+                        <div className="flex items-center gap-3">
+                          <div className="w-24 shrink-0 flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={skyColorEnabled} 
+                              onChange={(e) => setSkyColorEnabled(e.target.checked)}
+                              className="w-4 h-4 accent-indigo-600"
+                            />
+                            <span className="text-[11px] font-bold text-gray-600">Warna Awan</span>
+                          </div>
+                          <div className={`flex gap-2 flex-1 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                            {['#87CEEB', '#00BFFF', '#4682B4', '#FFB6C1', '#DDA0DD', '#F0E68C'].map(color => (
+                              <button 
+                                key={color} 
+                                onClick={() => setFilterSkyColor(color)}
+                                className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${filterSkyColor === color ? 'border-indigo-600 scale-110' : 'border-transparent'}`}
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                            <input 
+                              type="color" 
+                              value={filterSkyColor} 
+                              onChange={(e) => setFilterSkyColor(e.target.value)}
+                              className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer overflow-hidden rounded-full"
+                            />
+                          </div>
+                        </div>
+                        <div className={`space-y-3 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Pekat Awan</span>
+                            <input 
+                              type="range" min="0" max="100" 
+                              value={filterSkyIntensity} 
+                              onChange={(e) => setFilterSkyIntensity(parseInt(e.target.value))} 
+                              className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                            />
+                            <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{filterSkyIntensity}%</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Kecerahan Awan</span>
+                            <input 
+                              type="range" min="0" max="200" 
+                              value={filterSkyBrightness} 
+                              onChange={(e) => setFilterSkyBrightness(parseInt(e.target.value))} 
+                              className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                            />
+                            <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{filterSkyBrightness}%</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex justify-end pt-2">
+                        <button onClick={resetAI} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                          <RotateCcw size={12} />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  </Panel>
+
+                  <Panel id="filter" title="Filter" icon={<Sun size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+                    <div className="space-y-4 pb-4">
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['warm', 'cool', 'vintage', 'vivid', 'bw', 'ocean', 'sunset', 'forest', 'art', 'sketch', 'oil_painting', 'pop_art'] as ColorizeStyle[]).map(style => (
+                          <button 
+                            key={style} 
+                            onClick={() => setColorizeStyle(style)} 
+                            className={`py-2 rounded-xl text-[8px] font-bold capitalize transition-all border ${
+                              colorizeStyle === style ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-100'
+                            }`}
+                          >
+                            {style}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3 pt-2 border-t border-gray-50">
+                        <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Intensitas</span>
+                        <input 
+                          type="range" min="0" max="100" 
+                          value={colorizeIntensity} 
+                          onChange={(e) => setColorizeIntensity(parseInt(e.target.value))} 
+                          className="flex-1 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                        />
+                        <span className="text-[11px] font-black text-indigo-500 w-8 text-right">{colorizeIntensity}%</span>
+                      </div>
+                      <div className="flex justify-end pt-2">
+                        <button onClick={resetFilter} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                          <RotateCcw size={12} />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  </Panel>
+
+                  <Panel id="relight" title="Pencahayaan" icon={<Sun size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
                     <div className="space-y-5 pb-4">
                       <div className="flex flex-col gap-1.5">
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Arah Cahaya</span>
@@ -957,39 +1311,15 @@ export const FotoManager: React.FC<{
                         </div>
                       </div>
                       <div className="flex justify-end pt-2">
-                        <button onClick={resetRelight} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
+                        <button onClick={resetRelight} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                           <RotateCcw size={12} />
                           Reset
                         </button>
                       </div>
                     </div>
-                  )}
+                  </Panel>
                 </div>
 
-                {/* Bottom Buttons (Moved from Left Sidebar) */}
-                <div className="mt-auto p-4 border-t border-gray-100 flex gap-3 bg-gray-50/30">
-                  <button 
-                    onClick={handleDownloadAll}
-                    className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-indigo-100 active:scale-95 transition-all"
-                  >
-                    Simpan Semua
-                  </button>
-                  <button 
-                    onClick={() => { 
-                      if (confirm('Hapus semua foto?')) {
-                        setSelectedFiles([]); 
-                        setProcessedPreviews([]); 
-                        resetAdjust();
-                        resetFilter();
-                        resetWatermark();
-                        resetRelight();
-                      }
-                    }}
-                    className="flex-1 bg-red-500 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-red-100 active:scale-95 transition-all"
-                  >
-                    Hapus Semua
-                  </button>
-                </div>
               </div>
             </div>
     );
@@ -1009,10 +1339,10 @@ export const FotoManager: React.FC<{
       {/* Top Border line under header - Removed duplicate or adjusted to match */}
       <div className="w-full h-[0px] bg-gray-100 flex-none" />
 
-      {/* Top 60%: Preview Grid */}
-      <div className="h-[60%] flex flex-col p-4 overflow-hidden bg-gray-50/50">
+      {/* Top 56%: Preview Grid */}
+      <div className="h-[56%] flex flex-col p-4 overflow-hidden bg-gray-50/50">
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {processingPreviews ? (
+          {processingPreviews && processedPreviews.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center gap-4">
               <Loader2 className="animate-spin text-indigo-500" size={32} />
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Memuat...</p>
@@ -1048,12 +1378,14 @@ export const FotoManager: React.FC<{
                       >
                         <button 
                           onClick={() => handleRemoveSpecificFile(index)}
+                          disabled={!canDelete}
                           className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
                         >
                           <Trash2 size={16} />
                         </button>
                         <button 
                           onClick={() => handleDownloadSingle(index)}
+                          disabled={!canSave}
                           className="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
                         >
                           <Download size={16} />
@@ -1073,26 +1405,27 @@ export const FotoManager: React.FC<{
         </div>
       </div>
 
-      {/* Bottom 40%: Tools */}
-      <div className="h-[40%] bg-white border-t border-gray-100 flex flex-col overflow-hidden shadow-[0_-4px_20px_rgba(0,0,0,0.03)] pb-[env(safe-area-inset-bottom)]">
+      {/* Bottom 44%: Tools */}
+      <div className="h-[44%] bg-white border-t border-gray-100 flex flex-col overflow-hidden shadow-[0_-4px_20px_rgba(0,0,0,0.03)] pb-[env(safe-area-inset-bottom)]">
         {/* Row 1: Action Buttons */}
-        <div className="p-3 flex items-center justify-between gap-3 border-b border-gray-50">
+        <div className="p-2 flex items-center justify-between gap-2 border-b border-gray-50">
           <input type="file" ref={fileInputRef} accept="image/*" multiple className="hidden" onChange={handleFileSelection} />
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="flex-1 flex flex-col items-center justify-center gap-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-2xl active:scale-95 transition-all shadow-sm"
+            disabled={!canUpload}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 bg-white border border-gray-200 text-gray-700 py-1.5 rounded-xl active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Camera size={18} className="text-indigo-500" />
-            <span className="text-[10px] font-bold">Foto</span>
+            <Camera size={15} className="text-indigo-500" />
+            <span className="text-[9px] font-bold">Foto</span>
           </button>
 
           <button 
             onClick={handleDownloadAll}
-            disabled={selectedFiles.length === 0}
-            className="flex-1 flex flex-col items-center justify-center gap-1 bg-indigo-600 text-white py-2 rounded-2xl active:scale-95 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
+            disabled={!canSave || selectedFiles.length === 0}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 bg-indigo-600 text-white py-1.5 rounded-xl active:scale-95 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
           >
-            <Download size={18} />
-            <span className="text-[10px] font-bold">Simpan</span>
+            <Download size={15} />
+            <span className="text-[9px] font-bold">Simpan</span>
           </button>
           
           <button 
@@ -1106,176 +1439,17 @@ export const FotoManager: React.FC<{
                 resetRelight();
               }
             }}
-            disabled={selectedFiles.length === 0}
-            className="flex-1 flex flex-col items-center justify-center gap-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-2xl active:scale-95 transition-all shadow-sm disabled:opacity-30"
+            disabled={!canDelete || selectedFiles.length === 0}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 bg-white border border-gray-200 text-gray-700 py-1.5 rounded-xl active:scale-95 transition-all shadow-sm disabled:opacity-30"
           >
-            <Trash2 size={18} className="text-red-500" />
-            <span className="text-[10px] font-bold">Hapus</span>
+            <Trash2 size={15} className="text-red-500" />
+            <span className="text-[9px] font-bold">Hapus</span>
           </button>
         </div>
 
-        {/* Row 2: Category Tabs */}
-        <div className="flex overflow-x-auto no-scrollbar bg-gray-50/50 p-2 gap-2 border-b border-gray-50">
-          {(['watermark', 'adjust', 'ai', 'filter', 'relight'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`whitespace-nowrap px-4 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
-                activeTab === tab ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-500'
-              }`}
-            >
-              {tab === 'watermark' ? 'Watermark' : tab === 'adjust' ? 'Penyesuaian' : tab === 'ai' ? 'AI' : tab === 'filter' ? 'Filter' : 'Pencahayaan'}
-            </button>
-          ))}
-        </div>
-
-        {/* Row 3: Settings Content */}
-        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-white relative">
-          {activeTab === 'adjust' && (
-            <div className="space-y-4 pb-4">
-              {[
-                { label: 'Kecerahan', val: filterBrightness, set: setFilterBrightness, max: 200 },
-                { label: 'Kontras', val: filterContrast, set: setFilterContrast, max: 200 },
-                { label: 'Saturasi', val: filterSaturate, set: setFilterSaturate, max: 200 },
-                { label: 'Grayscale', val: filterGrayscale, set: setFilterGrayscale, max: 100 },
-                { label: 'Sepia', val: filterSepia, set: setFilterSepia, max: 100 }
-              ].map((item) => (
-                <div key={item.label} className="flex items-center gap-3">
-                  <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
-                  <input 
-                    type="range" min="0" max={item.max} 
-                    value={item.val} 
-                    onChange={(e) => item.set(parseInt(e.target.value))} 
-                    className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                  />
-                  <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{item.val}</span>
-                </div>
-              ))}
-              <div className="flex justify-end pt-2">
-                <button onClick={resetAdjust} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'ai' && (
-            <div className="space-y-4 pb-4">
-              {[
-                { label: 'Mulus', val: filterSmooth, set: setFilterSmooth, max: 100 },
-                { label: 'Cerah', val: filterSkinBright, set: setFilterSkinBright, max: 100 },
-                { label: 'Rata', val: filterSkinTone, set: setFilterSkinTone, max: 100 },
-                { label: 'HD Mode', val: filterSharpness, set: setFilterSharpness, max: 100 }
-              ].map((item) => (
-                <div key={item.label} className="flex items-center gap-3">
-                  <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
-                  <input 
-                    type="range" min="0" max={item.max} 
-                    value={item.val} 
-                    onChange={(e) => item.set(parseInt(e.target.value))} 
-                    className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                  />
-                  <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{item.val}</span>
-                </div>
-              ))}
-
-              {/* Sky Color Control */}
-              <div className="flex flex-col gap-3 pt-2 border-t border-gray-50">
-                <div className="flex items-center gap-3">
-                  <div className="w-24 shrink-0 flex items-center gap-2">
-                    <input 
-                      type="checkbox" 
-                      checked={skyColorEnabled} 
-                      onChange={(e) => setSkyColorEnabled(e.target.checked)}
-                      className="w-4 h-4 accent-indigo-600"
-                    />
-                    <span className="text-[11px] font-bold text-gray-600">Warna Awan</span>
-                  </div>
-                  <div className={`flex gap-2 flex-1 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                    {['#87CEEB', '#00BFFF', '#4682B4', '#FFB6C1', '#DDA0DD', '#F0E68C'].map(color => (
-                      <button 
-                        key={color} 
-                        onClick={() => setFilterSkyColor(color)}
-                        className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${filterSkyColor === color ? 'border-indigo-600 scale-110' : 'border-transparent'}`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                    <input 
-                      type="color" 
-                      value={filterSkyColor} 
-                      onChange={(e) => setFilterSkyColor(e.target.value)}
-                      className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer overflow-hidden rounded-full"
-                    />
-                  </div>
-                </div>
-                <div className={`space-y-3 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Pekat Awan</span>
-                    <input 
-                      type="range" min="0" max="100" 
-                      value={filterSkyIntensity} 
-                      onChange={(e) => setFilterSkyIntensity(parseInt(e.target.value))} 
-                      className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                    />
-                    <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{filterSkyIntensity}%</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Kecerahan Awan</span>
-                    <input 
-                      type="range" min="0" max="200" 
-                      value={filterSkyBrightness} 
-                      onChange={(e) => setFilterSkyBrightness(parseInt(e.target.value))} 
-                      className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                    />
-                    <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{filterSkyBrightness}%</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end pt-2">
-                <button onClick={resetAI} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'filter' && (
-            <div className="space-y-4 pb-4">
-              <div className="grid grid-cols-4 gap-2">
-                {(['warm', 'cool', 'vintage', 'vivid', 'bw', 'ocean', 'sunset', 'forest', 'art', 'sketch', 'oil_painting', 'pop_art'] as ColorizeStyle[]).map(style => (
-                  <button 
-                    key={style} 
-                    onClick={() => setColorizeStyle(style)} 
-                    className={`py-2 rounded-xl text-[8px] font-bold capitalize transition-all border ${
-                      colorizeStyle === style ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-100'
-                    }`}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3 pt-2 border-t border-gray-50">
-                <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Intensitas</span>
-                <input 
-                  type="range" min="0" max="100" 
-                  value={colorizeIntensity} 
-                  onChange={(e) => setColorizeIntensity(parseInt(e.target.value))} 
-                  className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
-                />
-                <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{colorizeIntensity}%</span>
-              </div>
-              <div className="flex justify-end pt-2">
-                <button onClick={resetFilter} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'watermark' && (
+        {/* Row 2-3: Accordion Panels */}
+        <div className={`flex-1 overflow-y-auto p-3 custom-scrollbar bg-white relative space-y-2 ${!canEditSettings ? 'opacity-50 pointer-events-none' : ''}`}>
+          <Panel id="watermark" title="Watermark" icon={<Layers size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
             <div className="space-y-5 pb-4">
               <div className="flex items-center justify-between px-1 mb-2">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Aktifkan Watermark</span>
@@ -1350,15 +1524,159 @@ export const FotoManager: React.FC<{
               </div>
             </div>
             <div className="flex justify-end pt-2">
-              <button onClick={resetWatermark} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
+              <button onClick={resetWatermark} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                 <RotateCcw size={12} />
                 Reset
               </button>
             </div>
           </div>
-          )}
+          </Panel>
 
-          {activeTab === 'relight' && (
+          <Panel id="adjust" title="Penyesuaian" icon={<Sliders size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+            <div className="space-y-4 pb-4">
+              {[
+                { label: 'Kecerahan', val: filterBrightness, set: setFilterBrightness, max: 200 },
+                { label: 'Kontras', val: filterContrast, set: setFilterContrast, max: 200 },
+                { label: 'Saturasi', val: filterSaturate, set: setFilterSaturate, max: 200 },
+                { label: 'Grayscale', val: filterGrayscale, set: setFilterGrayscale, max: 100 },
+                { label: 'Sepia', val: filterSepia, set: setFilterSepia, max: 100 }
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-3">
+                  <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
+                  <input 
+                    type="range" min="0" max={item.max} 
+                    value={item.val} 
+                    onChange={(e) => item.set(parseInt(e.target.value))} 
+                    className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                  />
+                  <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{item.val}</span>
+                </div>
+              ))}
+              <div className="flex justify-end pt-2">
+                <button onClick={resetAdjust} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel id="ai" title="AI" icon={<Sparkles size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+            <div className="space-y-4 pb-4">
+              {[
+                { label: 'Mulus', val: filterSmooth, set: setFilterSmooth, max: 100 },
+                { label: 'Cerah', val: filterSkinBright, set: setFilterSkinBright, max: 100 },
+                { label: 'Rata', val: filterSkinTone, set: setFilterSkinTone, max: 100 },
+                { label: 'HD Mode', val: filterSharpness, set: setFilterSharpness, max: 100 }
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-3">
+                  <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">{item.label}</span>
+                  <input 
+                    type="range" min="0" max={item.max} 
+                    value={item.val} 
+                    onChange={(e) => item.set(parseInt(e.target.value))} 
+                    className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                  />
+                  <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{item.val}</span>
+                </div>
+              ))}
+
+              {/* Sky Color Control */}
+              <div className="flex flex-col gap-3 pt-2 border-t border-gray-50">
+                <div className="flex items-center gap-3">
+                  <div className="w-24 shrink-0 flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      checked={skyColorEnabled} 
+                      onChange={(e) => setSkyColorEnabled(e.target.checked)}
+                      className="w-4 h-4 accent-indigo-600"
+                    />
+                    <span className="text-[11px] font-bold text-gray-600">Warna Awan</span>
+                  </div>
+                  <div className={`flex gap-2 flex-1 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                    {['#87CEEB', '#00BFFF', '#4682B4', '#FFB6C1', '#DDA0DD', '#F0E68C'].map(color => (
+                      <button 
+                        key={color} 
+                        onClick={() => setFilterSkyColor(color)}
+                        className={`w-6 h-6 rounded-full border-2 transition-transform active:scale-90 ${filterSkyColor === color ? 'border-indigo-600 scale-110' : 'border-transparent'}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                    <input 
+                      type="color" 
+                      value={filterSkyColor} 
+                      onChange={(e) => setFilterSkyColor(e.target.value)}
+                      className="w-6 h-6 p-0 border-0 bg-transparent cursor-pointer overflow-hidden rounded-full"
+                    />
+                  </div>
+                </div>
+                <div className={`space-y-3 transition-opacity ${skyColorEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Pekat Awan</span>
+                    <input 
+                      type="range" min="0" max="100" 
+                      value={filterSkyIntensity} 
+                      onChange={(e) => setFilterSkyIntensity(parseInt(e.target.value))} 
+                      className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                    />
+                    <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{filterSkyIntensity}%</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Kecerahan Awan</span>
+                    <input 
+                      type="range" min="0" max="200" 
+                      value={filterSkyBrightness} 
+                      onChange={(e) => setFilterSkyBrightness(parseInt(e.target.value))} 
+                      className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                    />
+                    <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{filterSkyBrightness}%</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end pt-2">
+                <button onClick={resetAI} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel id="filter" title="Filter" icon={<Sun size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
+            <div className="space-y-4 pb-4">
+              <div className="grid grid-cols-4 gap-2">
+                {(['warm', 'cool', 'vintage', 'vivid', 'bw', 'ocean', 'sunset', 'forest', 'art', 'sketch', 'oil_painting', 'pop_art'] as ColorizeStyle[]).map(style => (
+                  <button 
+                    key={style} 
+                    onClick={() => setColorizeStyle(style)} 
+                    className={`py-2 rounded-xl text-[8px] font-bold capitalize transition-all border ${
+                      colorizeStyle === style ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-100'
+                    }`}
+                  >
+                    {style}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 pt-2 border-t border-gray-50">
+                <span className="text-[11px] font-bold text-gray-600 w-24 shrink-0">Intensitas</span>
+                <input 
+                  type="range" min="0" max="100" 
+                  value={colorizeIntensity} 
+                  onChange={(e) => setColorizeIntensity(parseInt(e.target.value))} 
+                  className="w-40 accent-indigo-600 h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer" 
+                />
+                <span className="text-[11px] font-black text-indigo-500 flex-1 text-right">{colorizeIntensity}%</span>
+              </div>
+              <div className="flex justify-end pt-2">
+                <button onClick={resetFilter} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel id="relight" title="Pencahayaan" icon={<Sun size={16} className="text-indigo-500" />} openPanel={openPanel} setOpenPanel={setOpenPanel}>
             <div className="space-y-5 pb-4">
               <div className="flex flex-col gap-1.5">
                 <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Arah Cahaya</span>
@@ -1390,13 +1708,13 @@ export const FotoManager: React.FC<{
                 </div>
               </div>
               <div className="flex justify-end pt-2">
-                <button onClick={resetRelight} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all">
+                <button onClick={resetRelight} disabled={!canResetSettings} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-[10px] font-bold active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                   <RotateCcw size={12} />
                   Reset
                 </button>
               </div>
             </div>
-          )}
+          </Panel>
         </div>
       </div>
     </div>

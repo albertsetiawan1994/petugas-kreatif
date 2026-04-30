@@ -51,7 +51,8 @@ function App() {
     calendar: false,
     inspiration: false,
     volunteers: false,
-    foto: false
+    foto: false,
+    admin: false
   });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -105,6 +106,10 @@ function App() {
             source: 'google_login',
           })
           .catch((e) => console.warn('Failed to register signed-in user', e));
+
+        dbService
+          .migrateLegacyAdminPermissionsToAdminPage()
+          .catch((e) => console.warn('Failed to migrate legacy admin permissions', e));
         
         // Subscribe to real-time updates for user role and access
         unsubscribeRoleAndAccess = dbService.subscribeUserRoleAndAccessRealtime(email, (navAccess, roleDef) => {
@@ -119,7 +124,8 @@ function App() {
           calendar: false,
           inspiration: false,
           volunteers: false,
-          foto: false
+          foto: false,
+          admin: false
         });
         setActiveRole(null);
       }
@@ -383,7 +389,7 @@ function App() {
   }, [isAuthenticated, authReady, currentMonth]);
 
   useEffect(() => {
-    const orderedTabs: AppPageKey[] = ['home', 'calendar', 'inspiration', 'volunteers', 'foto'];
+    const orderedTabs: AppPageKey[] = ['home', 'calendar', 'inspiration', 'volunteers', 'foto', 'admin'];
     const firstAllowed = orderedTabs.find((tab) => pageAccess[tab]);
 
     if (!firstAllowed) {
@@ -582,7 +588,11 @@ function App() {
 
     const canViewFoto = hasAction('foto', 'view_foto');
     const canUploadFoto = hasAction('foto', 'upload_foto');
+    const canSaveFoto = hasAction('foto', 'simpan_foto');
     const canDeleteFoto = hasAction('foto', 'delete_foto');
+    const canEditSettingFoto = hasAction('foto', 'edit_setting_foto');
+    const canResetSettingFoto = hasAction('foto', 'reset_setting_foto');
+    const canReorderFoto = hasAction('foto', 'urutkan_foto');
 
     return (
       <div className="px-3 sm:px-4 md:px-6">
@@ -650,29 +660,40 @@ function App() {
                         canAdd={canAddPetugas}
                         canEdit={canEditPetugas}
                         canDelete={canDeletePetugas}
-                        adminPanel={
-                          (
-                            <AdminUserManager
-                              onBackup={handleBackup}
-                              onRestore={handleRestoreClick}
-                              permissions={{
-                                viewRegisteredUsers: hasAction('volunteers', 'view_user_terdaftar'),
-                                editRegisteredUserRole: hasAction('volunteers', 'edit_role_user_terdaftar'),
-                                viewRole: hasAction('volunteers', 'view_role'),
-                                editRole: hasAction('volunteers', 'edit_role'),
-                                deleteRole: hasAction('volunteers', 'delete_role'),
-                                addRole: hasAction('volunteers', 'tambah_role'),
-                                viewDataSecurity: hasAction('volunteers', 'view_data_keamanan'),
-                                backupData: hasAction('volunteers', 'backup_data'),
-                                restoreData: hasAction('volunteers', 'restore_data')
-                              }}
-                            />
-                          )
-                        }
                       />
                     );
                   case 'unavailable': return <UnavailableManager key={key} volunteers={volunteers} reloadData={reloadData} />;
-                  case 'foto': return <FotoManager key={key} canView={canViewFoto} />;
+                  case 'foto':
+                    return (
+                      <FotoManager
+                        key={key}
+                        canView={canViewFoto}
+                        canUpload={canUploadFoto}
+                        canSave={canSaveFoto}
+                        canDelete={canDeleteFoto}
+                        canEditSettings={canEditSettingFoto}
+                        canResetSettings={canResetSettingFoto}
+                        canReorder={canReorderFoto}
+                      />
+                    );
+                  case 'admin':
+                    return (
+                      <AdminUserManager
+                        onBackup={handleBackup}
+                        onRestore={handleRestoreClick}
+                        permissions={{
+                          viewRegisteredUsers: hasAction('admin', 'view_user_terdaftar'),
+                          editRegisteredUserRole: hasAction('admin', 'edit_role_user_terdaftar'),
+                          viewRole: hasAction('admin', 'view_role'),
+                          editRole: hasAction('admin', 'edit_role'),
+                          deleteRole: hasAction('admin', 'delete_role'),
+                          addRole: hasAction('admin', 'tambah_role'),
+                          viewDataSecurity: hasAction('admin', 'view_data_keamanan'),
+                          backupData: hasAction('admin', 'backup_data'),
+                          restoreData: hasAction('admin', 'restore_data')
+                        }}
+                      />
+                    );
                   default: return null;
                 }
               })()}
