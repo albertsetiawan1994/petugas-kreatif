@@ -74,7 +74,9 @@ export type ActivityType =
   | 'EVENT_ADD' | 'EVENT_EDIT' | 'EVENT_DELETE'
   | 'ASSIGNMENT_SAVE' | 'ASSIGNMENT_CLEAR'
   | 'CHAT_MESSAGE' | 'EXPORT_DATA' | 'IMPORT_DATA'
-  | 'APP_LOAD' | 'ADMIN_ADD' | 'ADMIN_REMOVE';
+  | 'APP_LOAD' | 'ADMIN_ADD' | 'ADMIN_REMOVE'
+  | 'HOMILY_ADD' | 'HOMILY_EDIT' | 'HOMILY_UPDATE' | 'HOMILY_DELETE'
+  | 'MASS_NAME_INIT' | 'MASS_NAME_SAVE' | 'MASS_NAME_DELETE';
 
 export interface Activity {
   type: ActivityType;

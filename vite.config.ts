@@ -7,6 +7,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      base: './',
       server: {
         port: 3000,
         host: '0.0.0.0',
@@ -31,18 +32,14 @@ export default defineConfig(({ mode }) => {
               {
                 src: '/logo-katedral.png',
                 sizes: '192x192',
-                type: 'image/png'
-              },
-              {
-                src: '/logo-katedral.png',
-                sizes: '512x512',
-                type: 'image/png'
+                type: 'image/png',
+                purpose: 'any'
               },
               {
                 src: '/logo-katedral.png',
                 sizes: '512x512',
                 type: 'image/png',
-                purpose: 'any maskable'
+                purpose: 'any'
               }
             ]
           }

@@ -202,6 +202,30 @@ export const ScheduleDashboard: React.FC<{
   const [highlightGen, setHighlightGen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   
+  // Use useMemo to generate colors so they are stable and don't change on re-renders/scroll/reload
+  const randomColors = useMemo(() => {
+    const brightColors = [
+      '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', 
+      '#22c55e', '#10b981', '#06b6d4', '#0ea5e9', '#3b82f6', 
+      '#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e',
+    ];
+    
+    // Simple hashing function to get a consistent color index from a string
+    const getColorIndex = (str: string) => {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return Math.abs(hash) % brightColors.length;
+    };
+
+    return scheduleRows.map((row) => {
+      // Use both date and name to determine the color index consistently
+      const key = `${row.event.date}_${row.event.name || ''}`;
+      return brightColors[getColorIndex(key)];
+    });
+  }, [scheduleRows]);
+  
   // Auto-save status state
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -984,17 +1008,17 @@ export const ScheduleDashboard: React.FC<{
         </div>
       )}
 
-      <div className="bg-white shadow-md border-b sticky top-0 z-40 p-4 space-y-4">
+      <div className="bg-white shadow-md border-b sticky top-0 z-40 py-4 px-0 space-y-4 w-auto md:px-4 -mx-3 sm:-mx-4 md:mx-0">
         {/* Navigation */}
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center w-full max-w-full overflow-hidden px-3 sm:px-4 md:px-0">
            <button 
              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} 
-             className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"
+             className="p-2.5 hover:bg-slate-100 bg-slate-50 text-indigo-600 rounded-xl transition-all active:scale-90 flex-shrink-0 shadow-sm border border-slate-200 group"
            >
-             <ChevronLeft size={24}/>
+             <ChevronLeft size={24} className="group-hover:-translate-x-0.5 transition-transform" />
            </button>
-           <div className="flex flex-col items-center">
-             <h1 className="font-black text-slate-800 uppercase tracking-tighter text-lg">{getMonthYearID(currentDate)}</h1>
+           <div className="flex flex-col items-center flex-1">
+             <h1 className="font-black text-slate-900 uppercase tracking-tighter text-xl">{getMonthYearID(currentDate)}</h1>
              {isFetchingData && !isSaving && (
                 <div className="flex items-center gap-1 text-[10px] text-slate-500 font-bold animate-in fade-in">
                     <Loader2 size={10} className="animate-spin" /> Mengambil data...
@@ -1012,14 +1036,14 @@ export const ScheduleDashboard: React.FC<{
            </div>
            <button 
              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} 
-             className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"
+             className="p-2.5 hover:bg-slate-100 bg-slate-50 text-indigo-600 rounded-xl transition-all active:scale-90 flex-shrink-0 shadow-sm border border-slate-200 group"
            >
-             <ChevronRight size={24}/>
+             <ChevronRight size={24} className="group-hover:translate-x-0.5 transition-transform" />
            </button>
         </div>
 
         {/* Combo Download Toolbar */}
-        <div className={`flex justify-center gap-2 ${customScreenshotMode ? 'flex-col sm:flex-row sm:items-center' : 'items-center'}`}>
+        <div className={`flex justify-center gap-2 w-full px-3 sm:px-4 md:px-0 ${customScreenshotMode ? 'flex-col sm:flex-row sm:items-center' : 'items-center'}`}>
             {canScreenshot && customScreenshotMode ? (
               <>
                 <input
@@ -1088,32 +1112,39 @@ export const ScheduleDashboard: React.FC<{
           <div className="space-y-6">
              {visibleRows.map((row, idx) => {
                const isNewGroup = groupRowSpanMap[idx] > 0;
+               const accentColor = randomColors[idx] || '#6366f1'; // indigo-500 fallback
+
                return (
                  <div key={row.event.id} className={highlightGen ? 'animate-highlight rounded-2xl' : ''}>
                    {isNewGroup && (
                      <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 mt-6 flex items-center gap-2">
-                       <div className="w-1.5 h-4 bg-indigo-600 rounded-full"></div> {formatDateID(row.event.date)}
+                       <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: accentColor }}></div> {formatDateID(row.event.date)}
                      </h2>
                    )}
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-4 border-l-4 border-l-indigo-500 break-inside-avoid">
-                      <div className="bg-slate-50 px-5 py-3 border-b flex justify-between items-center">
-                         <div className="flex flex-col">
-                           <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">MISA {toRoman(row.event.number)}</span>
-                           <span className="text-xl font-black text-slate-900 tracking-tighter">{row.event.time}</span>
-                           {row.event.name && (
-                             <span className="text-xs font-bold text-slate-600 mt-1 whitespace-normal break-words leading-snug">
-                               {renderEventName(row.event.name, 'font-semibold')}
-                             </span>
+                  <div 
+                    className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-4 border-l-4 break-inside-avoid"
+                    style={{ borderLeftColor: accentColor }}
+                  >
+                      <div className="bg-slate-50 px-5 py-3 border-b">
+                         <div className="flex justify-between items-start mb-2">
+                           <div className="flex flex-col">
+                             <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: accentColor }}>MISA {toRoman(row.event.number)}</span>
+                             <span className="text-2xl font-black text-slate-900 tracking-tighter leading-none">{row.event.time}</span>
+                           </div>
+                           {!readOnly && canGenerate && (
+                             <button 
+                                onClick={() => handleRowGenerate(row.event.id)}
+                                className="bg-white p-2 rounded-xl border border-gray-200 text-indigo-600 shadow-sm active:scale-90 transition-transform flex items-center gap-2 px-3"
+                             >
+                                <Wand2 size={14} />
+                                <span className="text-[10px] font-black uppercase">Generate Petugas</span>
+                             </button>
                            )}
                          </div>
-                          {!readOnly && canGenerate && (
-                           <button 
-                              onClick={() => handleRowGenerate(row.event.id)}
-                              className="bg-white p-2 rounded-xl border border-gray-200 text-indigo-600 shadow-sm active:scale-90 transition-transform flex items-center gap-2 px-3"
-                           >
-                              <Wand2 size={14} />
-                              <span className="text-[10px] font-black uppercase">Generate Petugas</span>
-                           </button>
+                         {row.event.name && (
+                           <div className="text-xs font-bold text-slate-600 whitespace-normal break-words leading-snug">
+                             {renderEventName(row.event.name, 'font-semibold')}
+                           </div>
                          )}
                       </div>
                       <div className="p-5 space-y-4">

@@ -3,11 +3,11 @@ import { Navbar } from './components/Navbar';
 import { ScheduleDashboard } from './components/ScheduleDashboard';
 import { CalendarManager } from './components/CalendarManager';
 import { VolunteerManager } from './components/VolunteerManager';
-import { UnavailableManager } from './components/UnavailableManager';
 import { InspirationManager } from './components/InspirationManager';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { AdminUserManager } from './components/AdminUserManager';
 import { FotoManager } from './components/FotoManager';
+import AlurManager from './components/AlurManager';
 import { dbService } from './services/db';
 import { format } from 'date-fns';
 import { Download, Upload, AlertTriangle, Aperture, Smartphone, CheckCircle, Info, LogOut, LogIn, Loader2 } from 'lucide-react';
@@ -35,7 +35,17 @@ function App() {
   };
 
   // Initialize tab from localStorage or default to 'home'
-  const [currentTab, setCurrentTab] = useState(() => localStorage.getItem('activeTab') || 'home');
+  const [currentTab, setCurrentTab] = useState<AppPageKey>(() => (localStorage.getItem('activeTab') as AppPageKey) || 'home');
+
+  const setTabWithPersistence = (tab: AppPageKey) => {
+    setCurrentTab(tab);
+    localStorage.setItem('activeTab', tab);
+  };
+
+  // Persist tab change to localStorage
+  useEffect(() => {
+    localStorage.setItem('activeTab', currentTab);
+  }, [currentTab]);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [dataVersion, setDataVersion] = useState(0); 
@@ -52,6 +62,7 @@ function App() {
     inspiration: false,
     volunteers: false,
     foto: false,
+    alur: false,
     admin: false
   });
   const [authError, setAuthError] = useState('');
@@ -90,8 +101,23 @@ function App() {
       const isAuth = !!user;
       setIsAuthenticated(isAuth);
       localStorage.setItem('isLoggedIn', isAuth ? 'true' : 'false');
-
+      
       const email = (user?.email || '').toLowerCase();
+
+      if (isAuth) {
+        // If this is a fresh login, force go to 'home' (Jadwal)
+        const isFreshLogin = localStorage.getItem('freshLogin') === 'true';
+        if (isFreshLogin) {
+          setCurrentTab('home');
+          localStorage.setItem('activeTab', 'home');
+          localStorage.removeItem('freshLogin');
+        } else {
+          // Normal refresh: we ALREADY initialized currentTab from localStorage 
+          // at the top of the component:
+          // const [currentTab, setCurrentTab] = useState(() => localStorage.getItem('activeTab') || 'home');
+          // So we don't need to do anything here except make sure we don't accidentally overwrite it.
+        }
+      }
 
       // Cleanup previous subscription if it exists
       if (unsubscribeRoleAndAccess) {
@@ -125,6 +151,7 @@ function App() {
           inspiration: false,
           volunteers: false,
           foto: false,
+          alur: false,
           admin: false
         });
         setActiveRole(null);
@@ -389,24 +416,28 @@ function App() {
   }, [isAuthenticated, authReady, currentMonth]);
 
   useEffect(() => {
-    const orderedTabs: AppPageKey[] = ['home', 'calendar', 'inspiration', 'volunteers', 'foto', 'admin'];
+    // Only perform auto-redirect if auth is ready and user is authenticated
+    if (!authReady || !isAuthenticated) return;
+
+    const orderedTabs: AppPageKey[] = ['home', 'calendar', 'inspiration', 'volunteers', 'foto', 'alur', 'admin'];
     const firstAllowed = orderedTabs.find((tab) => pageAccess[tab]);
 
+    // If we have access info but no allowed pages (should be rare for logged in users)
     if (!firstAllowed) {
-      if (currentTab !== 'home') {
-        setCurrentTab('home');
-      }
+      // Don't redirect immediately to home, as pageAccess might still be loading from db
       return;
     }
 
-    if (currentTab === 'settings') {
-      setCurrentTab(firstAllowed);
-      return;
-    }
+    // Redirect from non-existent or forbidden tabs
     if (pageAccess[currentTab as AppPageKey] === false) {
-      setCurrentTab(firstAllowed);
+      // Only redirect if we are SURE the pageAccess has been loaded for this user
+      // We can check if any page is enabled as a proxy for "access info is loaded"
+      const hasAnyAccess = Object.values(pageAccess).some(v => v === true);
+      if (hasAnyAccess) {
+        setCurrentTab(firstAllowed);
+      }
     }
-  }, [pageAccess, currentTab]);
+  }, [pageAccess, currentTab, authReady, isAuthenticated]);
 
   // Save tab to localStorage whenever it changes
   useEffect(() => {
@@ -448,9 +479,11 @@ function App() {
   };
 
   const handleLogin = async () => {
-    setAuthError('');
-    setAuthLoading(true);
     try {
+      setAuthLoading(true);
+      setAuthError('');
+      // Set a flag that this is a fresh login
+      localStorage.setItem('freshLogin', 'true');
       await loginWithGoogle();
     } catch (error: any) {
       const code = error?.code || '';
@@ -594,6 +627,11 @@ function App() {
     const canResetSettingFoto = hasAction('foto', 'reset_setting_foto');
     const canReorderFoto = hasAction('foto', 'urutkan_foto');
 
+    const canViewAlur = hasAction('alur', 'view_alur');
+    const canAddHomili = hasAction('alur', 'tambah_homili');
+    const canEditHomili = hasAction('alur', 'edit_homili');
+    const canDeleteHomili = hasAction('alur', 'delete_homili');
+
     return (
       <div className="px-3 sm:px-4 md:px-6">
         {/* Keep Jadwal & Kalender mounted for instant tab switches */}
@@ -662,7 +700,6 @@ function App() {
                         canDelete={canDeletePetugas}
                       />
                     );
-                  case 'unavailable': return <UnavailableManager key={key} volunteers={volunteers} reloadData={reloadData} />;
                   case 'foto':
                     return (
                       <FotoManager
@@ -674,6 +711,15 @@ function App() {
                         canEditSettings={canEditSettingFoto}
                         canResetSettings={canResetSettingFoto}
                         canReorder={canReorderFoto}
+                      />
+                    );
+                  case 'alur':
+                    return (
+                      <AlurManager 
+                        key={key} 
+                        canAddHomili={canAddHomili}
+                        canEditHomili={canEditHomili}
+                        canDeleteHomili={canDeleteHomili}
                       />
                     );
                   case 'admin':
@@ -689,6 +735,7 @@ function App() {
                           deleteRole: hasAction('admin', 'delete_role'),
                           addRole: hasAction('admin', 'tambah_role'),
                           viewDataSecurity: hasAction('admin', 'view_data_keamanan'),
+                          viewNamaMisa: hasAction('admin', 'view_nama_misa'),
                           backupData: hasAction('admin', 'backup_data'),
                           restoreData: hasAction('admin', 'restore_data')
                         }}
@@ -703,6 +750,17 @@ function App() {
       </div>
     );
   };
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="animate-spin text-slate-900" size={40} />
+          <p className="text-slate-600 font-medium">Memulai aplikasi...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
@@ -779,7 +837,7 @@ function App() {
 
 
   return (
-    <div className="min-h-screen bg-gray-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-gray-50 text-slate-900 font-sans flex flex-col w-full overflow-x-hidden">
       {loading && <LoadingOverlay message={loadingMessage} />}
 
       {showConfirmRestore && (
@@ -846,10 +904,10 @@ function App() {
         </div>
       </div>
 
-      <div className="w-full md:w-[80%] mx-auto pb-24 sm:pb-28">
+      <div className="w-full md:w-[80%] mx-auto pb-24 sm:pb-28 flex-1">
         {renderContent()}
       </div>
-      <Navbar currentTab={currentTab} setTab={setCurrentTab} isViewer={false} pageAccess={pageAccess} />
+      <Navbar currentTab={currentTab} setTab={setTabWithPersistence} isViewer={false} pageAccess={pageAccess} />
     </div>
   );
 }

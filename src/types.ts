@@ -64,7 +64,13 @@ export interface Schedule {
     }
 }
 
-export type AppPageKey = 'home' | 'calendar' | 'inspiration' | 'volunteers' | 'foto' | 'admin';
+export interface MassName {
+  id: string;
+  masa: string;
+  name: string;
+}
+
+export type AppPageKey = 'home' | 'calendar' | 'inspiration' | 'volunteers' | 'foto' | 'alur' | 'admin';
 
 export interface RoleFunctionDefinition {
   key: string;
@@ -143,6 +149,16 @@ export const ROLE_PAGE_DEFINITIONS: RolePageDefinition[] = [
     ],
   },
   {
+    key: 'alur',
+    label: 'Alur',
+    functions: [
+      { key: 'view_alur', label: 'View alur' },
+      { key: 'tambah_homili', label: 'Tambah Homili' },
+      { key: 'edit_homili', label: 'Edit Homili' },
+      { key: 'delete_homili', label: 'Delete Homili' },
+    ],
+  },
+  {
     key: 'admin',
     label: 'Admin',
     functions: [
@@ -153,6 +169,7 @@ export const ROLE_PAGE_DEFINITIONS: RolePageDefinition[] = [
       { key: 'delete_role', label: 'Delete role' },
       { key: 'tambah_role', label: 'Tambah role' },
       { key: 'view_data_keamanan', label: 'View Data & Keamanan' },
+      { key: 'view_nama_misa', label: 'View List Nama Misa' },
       { key: 'backup_data', label: 'Backup data' },
       { key: 'restore_data', label: 'Restore data' },
     ],

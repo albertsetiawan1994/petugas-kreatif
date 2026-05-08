@@ -12,6 +12,20 @@ dist
 dist-ssr
 *.local
 
+# Environment & secrets
+.env
+
+# Firebase local cache
+.firebase/
+
+# Local tooling
+.continue/
+
+# Local backups / office files
+Backup-*.json
+*.xlsx
+*.xls
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

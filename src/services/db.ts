@@ -22,7 +22,8 @@ import {
   CombinedScheduleRow,
   AppPageKey,
   ROLE_PAGE_DEFINITIONS,
-  UserRoleDefinition
+  UserRoleDefinition,
+  MassName
 } from '../types';
 import { db, ensureFirebaseAuth, getCurrentUserEmail, logActivity } from './firebase';
 
@@ -40,10 +41,14 @@ interface AppDB extends DBSchema {
     key: string;
     value: ScheduleAssignment;
   };
+  mass_names: {
+    key: string;
+    value: MassName;
+  };
 }
 
 const DB_NAME = 'church-scheduler-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const COLLECTIONS = {
   volunteers: 'volunteers',
@@ -52,7 +57,9 @@ const COLLECTIONS = {
   backups: 'backups',
   admins: 'admins',
   users: 'users',
-  roles: 'roles'
+  roles: 'roles',
+  homilies: 'homilies',
+  mass_names: 'mass_names'
 } as const;
 
 const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com'];
@@ -84,6 +91,7 @@ const buildPages = (enabledByDefault: boolean) => ({
   inspiration: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'inspiration') },
   volunteers: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'volunteers') },
   foto: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'foto') },
+  alur: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'alur') },
   admin: { enabled: enabledByDefault, actions: buildActions(enabledByDefault, 'admin') }
 }) as UserRoleDefinition['pages'];
 
@@ -143,6 +151,10 @@ const getDB = () => {
         
         if (!db.objectStoreNames.contains('assignments')) {
           db.createObjectStore('assignments', { keyPath: 'eventId' });
+        }
+
+        if (!db.objectStoreNames.contains('mass_names')) {
+          db.createObjectStore('mass_names', { keyPath: 'id' });
         }
       },
     });
@@ -347,9 +359,57 @@ export const dbService = {
     if (!db) return [];
     await ensureFirebaseAuth();
     const snapshot = await getDocs(collection(db, COLLECTIONS.roles));
-    return snapshot.docs
-      .map(d => normalizeRole(d.data()))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return snapshot.docs.map(d => normalizeRole(d.data()));
+  },
+
+  async getAllMassNames(): Promise<MassName[]> {
+    if (!db) return [];
+    await ensureFirebaseAuth();
+    const snapshot = await getDocs(collection(db, COLLECTIONS.mass_names));
+    return snapshot.docs.map(d => stripFirestoreMeta<MassName>(d.data()));
+  },
+
+  async saveMassName(massName: MassName) {
+    if (!db) return;
+    await assertWriteAccess();
+    await setDoc(doc(db, COLLECTIONS.mass_names, massName.id), serializeForCloud(massName));
+    await logActivity('MASS_NAME_SAVE', { id: massName.id, name: massName.name, masa: massName.masa });
+  },
+
+  async deleteMassName(id: string) {
+    if (!db) return;
+    await assertWriteAccess();
+    const massNameDoc = await getDoc(doc(db, COLLECTIONS.mass_names, id));
+    const massName = massNameDoc.data() as MassName;
+    await deleteDoc(doc(db, COLLECTIONS.mass_names, id));
+    if (massName) {
+      await logActivity('MASS_NAME_DELETE', { id, name: massName.name, masa: massName.masa });
+    }
+  },
+
+  async initializeMassNames(mapping: Record<string, string[]>) {
+    if (!db) return;
+    await assertWriteAccess();
+    
+    const current = await this.getAllMassNames();
+    
+    if (current.length > 50) {
+      return;
+    }
+
+    const batch = writeBatch(db);
+    Object.entries(mapping).forEach(([masa, names]) => {
+      names.forEach(name => {
+        const cleanName = name.trim();
+        // Remove slashes and other special characters from ID to avoid Firebase path issues
+        const id = `${masa}-${cleanName}`.replace(/[\s\/]+/g, '-').toLowerCase();
+        const massName: MassName = { id, masa, name: cleanName };
+        batch.set(doc(db, COLLECTIONS.mass_names, id), serializeForCloud(massName));
+      });
+    });
+    
+    await batch.commit();
+    await logActivity('MASS_NAME_INIT');
   },
 
   async saveRoleDefinition(role: UserRoleDefinition) {
@@ -399,11 +459,15 @@ export const dbService = {
       inspiration: false,
       volunteers: false,
       foto: false,
+      alur: false,
       admin: false
     };
     const emailLower = String(email || '').toLowerCase();
     if (isSuperAdminEmail(emailLower)) {
-      return { home: true, calendar: true, inspiration: true, volunteers: true, foto: true, admin: true };
+      return { 
+        home: true, calendar: true, inspiration: true, volunteers: true, 
+        foto: true, alur: true, admin: true 
+      };
     }
     if (!db || !emailLower) return fallback;
     await ensureFirebaseAuth();
@@ -418,6 +482,7 @@ export const dbService = {
       inspiration: !!role.pages.inspiration.enabled,
       volunteers: !!role.pages.volunteers.enabled,
       foto: !!role.pages.foto?.enabled,
+      alur: !!role.pages.alur?.enabled,
       admin: !!role.pages.admin?.enabled
     };
   },
@@ -948,5 +1013,43 @@ export const dbService = {
       console.error("Import failed:", e);
       return false;
     }
+  },
+
+  // --- Homilies ---
+  async getHomilies(): Promise<string[]> {
+    if (!db) return [];
+    await ensureFirebaseAuth();
+    const snapshot = await getDocs(collection(db, COLLECTIONS.homilies));
+    return snapshot.docs.map(d => d.id).sort((a, b) => a.localeCompare(b));
+  },
+
+  async addHomily(name: string) {
+    if (!db) return;
+    await assertWriteAccess();
+    await setDoc(doc(db, COLLECTIONS.homilies, name), {
+      name,
+      createdAt: serverTimestamp()
+    });
+    await logActivity('HOMILY_ADD', { name });
+  },
+
+  async updateHomily(oldName: string, newName: string) {
+    if (!db) return;
+    await assertWriteAccess();
+    const batch = writeBatch(db);
+    batch.delete(doc(db, COLLECTIONS.homilies, oldName));
+    batch.set(doc(db, COLLECTIONS.homilies, newName), {
+      name: newName,
+      createdAt: serverTimestamp()
+    });
+    await batch.commit();
+    await logActivity('HOMILY_UPDATE', { oldName, newName });
+  },
+
+  async deleteHomily(name: string) {
+    if (!db) return;
+    await assertWriteAccess();
+    await deleteDoc(doc(db, COLLECTIONS.homilies, name));
+    await logActivity('HOMILY_DELETE', { name });
   }
 };

@@ -18,7 +18,7 @@ service cloud.firestore {
 
     function isElevatedUser() {
       return isAdminEmail()
-        || get(/databases/$(database)/documents/users/$(currentEmail())).data.role in ["Admin", "Administrator"];
+        || get(/databases/$(database)/documents/users/$(currentEmail())).data.role in ["Admin", "Administrator", "Sekretaris", "Seketaris", "Secretary"];
     }
 
     match /users/{userEmail} {

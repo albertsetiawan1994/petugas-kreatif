@@ -5,7 +5,7 @@ import { MassEvent, Volunteer, ScheduleAssignment, Role, CombinedScheduleRow } f
 import { dbService } from '../services/db';
 import { generateId, toRoman, isCatholicHoliday } from '../services/utils';
 import { fetchHolidays } from '../services/holidayService';
-import { Plus, X, Edit2, Clock, Trash2, Loader2, Tv, Mic, Video, Camera, Sparkles, Info } from 'lucide-react';
+import { Plus, X, Edit2, Clock, Trash2, Loader2, Tv, Mic, Video, Camera, Sparkles, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
 import { showAlert } from '../services/alertService';
@@ -47,9 +47,29 @@ export const CalendarManager: React.FC<{
   const [editingId, setEditingId] = useState<string | null>(null); // Track ID if editing
   const [allowDuplicate, setAllowDuplicate] = useState(false); // Checkbox exception for duplicates
   const [overrideMisaName, setOverrideMisaName] = useState(false); // Checkbox to allow manual mass name entry
-  const [misaName, setMisaName] = useState('Misa ');
-  const [misaNumber, setMisaNumber] = useState(3);
-  const [misaTime, setMisaTime] = useState('10:00');
+  const [misaName, setMisaName] = useState('');
+  const [misaNumber, setMisaNumber] = useState(1);
+  const [misaTime, setMisaTime] = useState('06:00');
+
+  const getDefaultTime = (date: Date, number: number) => {
+    const day = date.getDay(); // 0: Sunday, 6: Saturday
+    
+    if (day === 0) { // Sunday
+      if (number === 1) return '06:30';
+      if (number === 2) return '08:00';
+      if (number === 3) return '10:00';
+      if (number === 4) return '15:00';
+      if (number === 5) return '17:00';
+      return '06:30'; // Fallback
+    }
+    
+    if (day === 6) { // Saturday
+      return '17:30';
+    }
+    
+    // Monday - Friday
+    return '06:00';
+  };
   
   // Role Config State - Changed default to false
   const [needsOBS, setNeedsOBS] = useState(false);
@@ -81,12 +101,15 @@ export const CalendarManager: React.FC<{
       setMisaName(dayEvents[0].name);
       setOverrideMisaName(false); // Subsequent masses: do not check by default
     } else {
-      setMisaName('Misa ');
+      setMisaName('');
       setOverrideMisaName(true); // First mass of the day: check by default
     }
     
-    setMisaNumber(3); // Default to Misa 3
-    setMisaTime('10:00'); // Default to 10:00 for Misa 3
+    // Default Misa number based on day
+    const day = date.getDay();
+    const defaultNumber = day === 0 ? 3 : 1; // Sunday defaults to Misa 3, others to Misa 1
+    setMisaNumber(defaultNumber);
+    setMisaTime(getDefaultTime(date, defaultNumber));
     
     // Default Values - Changed to false
     setNeedsOBS(false);
@@ -422,10 +445,15 @@ export const CalendarManager: React.FC<{
       />
 
       {/* Month Navigation */}
-      <div className="flex justify-between items-center mb-6">
-        <button onClick={() => changeMonth(-1)} className="p-2 bg-white rounded shadow text-gray-600 hover:bg-gray-50">{'<'}</button>
+      <div className="flex justify-between items-center mb-6 px-1">
+        <button 
+          onClick={() => changeMonth(-1)} 
+          className="p-2.5 hover:bg-slate-100 bg-slate-50 text-indigo-600 rounded-xl transition-all active:scale-90 flex-shrink-0 shadow-sm border border-slate-200 group"
+        >
+          <ChevronLeft size={24} className="group-hover:-translate-x-0.5 transition-transform" />
+        </button>
         <div className="flex flex-col items-center">
-          <h2 className="text-xl font-bold text-slate-800 capitalize">
+          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">
             {format(currentDate, 'MMMM yyyy', { locale: id })}
           </h2>
           {isFetchingData && (
@@ -434,7 +462,12 @@ export const CalendarManager: React.FC<{
             </div>
           )}
         </div>
-        <button onClick={() => changeMonth(1)} className="p-2 bg-white rounded shadow text-gray-600 hover:bg-gray-50">{'>'}</button>
+        <button 
+          onClick={() => changeMonth(1)} 
+          className="p-2.5 hover:bg-slate-100 bg-slate-50 text-indigo-600 rounded-xl transition-all active:scale-90 flex-shrink-0 shadow-sm border border-slate-200 group"
+        >
+          <ChevronRight size={24} className="group-hover:translate-x-0.5 transition-transform" />
+        </button>
       </div>
 
       {/* Calendar Grid */}
@@ -522,16 +555,16 @@ export const CalendarManager: React.FC<{
                               setAllowDuplicate(checked);
                               // User request: If "Beda Misa" is checked, reset name and allow input
                               if (checked) {
-                                setMisaName('Misa ');
+                                setMisaName('');
                                 setOverrideMisaName(true);
                               }
                             }}
                           />
-                          <div className="w-4 h-4 border border-gray-300 rounded peer-checked:bg-blue-600 peer-checked:border-blue-600 transition-all flex items-center justify-center">
-                            {allowDuplicate && <Plus size={12} className="text-white rotate-45" />}
+                          <div className={`w-3.5 h-3.5 border border-gray-300 rounded peer-checked:bg-blue-600 peer-checked:border-blue-600 transition-all flex items-center justify-center`}>
+                            {allowDuplicate && <Plus size={10} className="text-white rotate-45" />}
                           </div>
                         </div>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter group-hover:text-blue-500 transition-colors">Beda Misa</span>
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter group-hover:text-blue-500 transition-colors">Beda Misa</span>
                      </label>
                    </div>
                  )}
@@ -597,9 +630,9 @@ export const CalendarManager: React.FC<{
                            onClick={() => {
                              const newVal = Math.max(1, misaNumber - 1);
                              setMisaNumber(newVal);
-                             if (newVal === 3) setMisaTime('10:00');
-                             if (newVal === 4) setMisaTime('15:00');
-                             if (newVal === 5) setMisaTime('17:00');
+                             if (selectedDate) {
+                               setMisaTime(getDefaultTime(selectedDate, newVal));
+                             }
                            }}
                         >-</button>
                       )}
@@ -612,9 +645,9 @@ export const CalendarManager: React.FC<{
                            onClick={() => {
                              const newVal = misaNumber + 1;
                              setMisaNumber(newVal);
-                             if (newVal === 3) setMisaTime('10:00');
-                             if (newVal === 4) setMisaTime('15:00');
-                             if (newVal === 5) setMisaTime('17:00');
+                             if (selectedDate) {
+                               setMisaTime(getDefaultTime(selectedDate, newVal));
+                             }
                            }}
                         >+</button>
                       )}

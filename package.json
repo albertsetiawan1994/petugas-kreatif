@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --force",
     "build": "vite build",
+    "deploy": "npm run build && firebase deploy",
+    "deploy:rules": "firebase deploy --only firestore:rules",
     "lint": "tsc --noEmit",
     "preview": "vite preview"
   },
@@ -24,6 +26,7 @@
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "idb": "^8.0.3",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",
     "motion": "^12.34.3",
     "react": "^19.2.4",

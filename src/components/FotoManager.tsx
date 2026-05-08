@@ -484,20 +484,41 @@ export const FotoManager: React.FC<{
           const wWidth = watermarkImg.width * wScale;
           const wHeight = watermarkImg.height * wScale;
           
+          // Calculate height at 10% size as reference for center-anchoring
+          const wHeight10 = watermarkImg.height * ((minSide * 0.1 * 2.5) / watermarkImg.width);
+          
           let x = 0, y = 0;
           const paddingX = minSide * 0.04;
-          const paddingY = minSide * 0.02;
-          const topNudge = minSide * 0.04; // Geser sedikit lebih ke atas untuk semua posisi atas
-          const bottomNudge = minSide * 0.04; // Geser sedikit lebih ke bawah untuk semua posisi bawah
           
           switch (watermarkPosition) {
-            case 'bottom-right': x = canvas.width - wWidth - paddingX; y = canvas.height - wHeight - paddingY + bottomNudge; break;
-            case 'bottom-left': x = paddingX; y = canvas.height - wHeight - paddingY + bottomNudge; break;
-            case 'top-right': x = canvas.width - wWidth - paddingX; y = paddingY - topNudge; break;
-            case 'top-left': x = paddingX; y = paddingY - topNudge; break;
-            case 'center': x = (canvas.width - wWidth) / 2; y = (canvas.height - wHeight) / 2; break;
-            case 'bottom-center': x = (canvas.width - wWidth) / 2; y = canvas.height - wHeight - paddingY + bottomNudge; break;
-            case 'top-center': x = (canvas.width - wWidth) / 2; y = paddingY - topNudge; break;
+            case 'bottom-right': 
+              x = canvas.width - wWidth - paddingX; 
+              y = canvas.height - (wHeight10 + wHeight) / 2 + (wHeight * 0.2); 
+              break;
+            case 'bottom-left': 
+              x = paddingX; 
+              y = canvas.height - (wHeight10 + wHeight) / 2 + (wHeight * 0.2); 
+              break;
+            case 'top-right': 
+              x = canvas.width - wWidth - paddingX; 
+              y = (wHeight10 - wHeight) / 2 - (wHeight * 0.2); 
+              break;
+            case 'top-left': 
+              x = paddingX; 
+              y = (wHeight10 - wHeight) / 2 - (wHeight * 0.2); 
+              break;
+            case 'center': 
+              x = (canvas.width - wWidth) / 2; 
+              y = (canvas.height - wHeight) / 2; 
+              break;
+            case 'bottom-center': 
+              x = (canvas.width - wWidth) / 2; 
+              y = canvas.height - (wHeight10 + wHeight) / 2 + (wHeight * 0.2); 
+              break;
+            case 'top-center': 
+              x = (canvas.width - wWidth) / 2; 
+              y = (wHeight10 - wHeight) / 2 - (wHeight * 0.2); 
+              break;
           }
 
           // Ensure watermark stays within canvas bounds
