@@ -23,7 +23,8 @@ import {
   AppPageKey,
   ROLE_PAGE_DEFINITIONS,
   UserRoleDefinition,
-  MassName
+  MassName,
+  AlurDownloadHistory
 } from '../types';
 import { db, ensureFirebaseAuth, getCurrentUserEmail, logActivity } from './firebase';
 
@@ -59,7 +60,8 @@ const COLLECTIONS = {
   users: 'users',
   roles: 'roles',
   homilies: 'homilies',
-  mass_names: 'mass_names'
+  mass_names: 'mass_names',
+  alur_history: 'alur_history'
 } as const;
 
 const SUPER_ADMIN_EMAILS = ['albertse2602@gmail.com'];
@@ -1051,5 +1053,78 @@ export const dbService = {
     await assertWriteAccess();
     await deleteDoc(doc(db, COLLECTIONS.homilies, name));
     await logActivity('HOMILY_DELETE', { name });
+  },
+
+  // --- Alur Download History ---
+  async saveAlurHistory(history: AlurDownloadHistory) {
+    if (!db) return;
+    await assertWriteAccess();
+    
+    // Enforce 10 items limit
+    const snapshot = await getDocs(query(collection(db, COLLECTIONS.alur_history)));
+    const docs = snapshot.docs.sort((a, b) => {
+      const tA = (a.data() as any).timestamp?.seconds || 0;
+      const tB = (b.data() as any).timestamp?.seconds || 0;
+      return tA - tB; // Oldest first
+    });
+
+    if (docs.length >= 10 && !docs.some(d => d.id === history.id)) {
+      // Delete the oldest one if we are adding a new item (not editing existing)
+      await deleteDoc(docs[0].ref);
+    }
+
+    await setDoc(doc(db, COLLECTIONS.alur_history, history.id), {
+      ...history,
+      timestamp: serverTimestamp()
+    });
+  },
+
+  async getAlurHistory(): Promise<AlurDownloadHistory[]> {
+    if (!db) return [];
+    await ensureFirebaseAuth();
+    const snapshot = await getDocs(query(collection(db, COLLECTIONS.alur_history)));
+    return snapshot.docs
+      .map(d => stripFirestoreMeta<AlurDownloadHistory>(d.data()))
+      .sort((a, b) => {
+        const tA = a.timestamp?.seconds || 0;
+        const tB = b.timestamp?.seconds || 0;
+        return tB - tA;
+      })
+      .slice(0, 10); // Return only 10 latest
+  },
+
+  async deleteAlurHistory(id: string) {
+    if (!db) return;
+    await assertWriteAccess();
+    await deleteDoc(doc(db, COLLECTIONS.alur_history, id));
+  },
+
+  async deleteAllAlurHistory() {
+    if (!db) return;
+    await assertWriteAccess();
+    const snapshot = await getDocs(collection(db, COLLECTIONS.alur_history));
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  },
+
+  subscribeAlurHistoryRealtime(callback: (history: AlurDownloadHistory[]) => void): Unsubscribe {
+    if (!db) return () => {};
+    const q = query(collection(db, COLLECTIONS.alur_history));
+    return onSnapshot(q, (snapshot) => {
+      const history = snapshot.docs
+        .map(d => stripFirestoreMeta<AlurDownloadHistory>(d.data()))
+        .sort((a, b) => {
+          const tA = a.timestamp?.seconds || 0;
+          const tB = b.timestamp?.seconds || 0;
+          return tB - tA;
+        })
+        .slice(0, 10);
+      callback(history);
+    }, (error) => {
+      if (!isPermissionDeniedError(error)) {
+        console.error('subscribeAlurHistoryRealtime error', error);
+      }
+    });
   }
 };

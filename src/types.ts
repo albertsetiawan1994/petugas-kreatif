@@ -70,6 +70,21 @@ export interface MassName {
   name: string;
 }
 
+export interface AlurDownloadHistory {
+  id: string;
+  fileName: string;
+  timestamp: any;
+  data: {
+    selectedMasa: string;
+    selectedMisa: string;
+    bacaan1: string;
+    mazmur: string;
+    bacaan2: string;
+    bacaanInjil: string;
+    selectedHomili: string;
+  };
+}
+
 export type AppPageKey = 'home' | 'calendar' | 'inspiration' | 'volunteers' | 'foto' | 'alur' | 'admin';
 
 export interface RoleFunctionDefinition {

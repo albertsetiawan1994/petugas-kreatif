@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Layers, Plus, Check, X, Edit2, Trash2, Settings2, Download, Loader2 } from 'lucide-react';
+import { Layers, Plus, Check, X, Edit2, Trash2, Settings2, Download, Loader2, History, Trash } from 'lucide-react';
 import { dbService } from '../services/db';
 import { showAlert } from '../services/alertService';
 import { ConfirmModal } from './ConfirmModal';
@@ -7,6 +7,7 @@ import { toPng } from 'html-to-image';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { AlurDownloadHistory } from '../types';
 
 import JSZip from 'jszip';
 
@@ -199,6 +200,9 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
   const [editingHomili, setEditingHomili] = useState<{ oldName: string, newName: string } | null>(null);
   const [deleteTargetHomili, setDeleteTargetHomili] = useState<string | null>(null);
   const [homiliOptions, setHomiliOptions] = useState<string[]>([]);
+  const [downloadHistory, setDownloadHistory] = useState<AlurDownloadHistory[]>([]);
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [lastGeneratedZip, setLastGeneratedZip] = useState<{ blob: Blob, fileName: string, dataHash: string } | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -233,33 +237,60 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
     fetchMassNames();
   }, []);
 
+  useEffect(() => {
+    const unsub = dbService.subscribeAlurHistoryRealtime((history) => {
+      setDownloadHistory(history);
+    });
+    return () => unsub();
+  }, []);
+
   const availableMisa = useMemo(() => {
     return selectedMasa ? misaMapping[selectedMasa] || [] : [];
   }, [selectedMasa, misaMapping]);
 
-  const slides = useMemo(() => [
-    { title: selectedMisa, subtitle: 'Ritus Pembukaan', fileName: '01-Ritus_Pembukaan', loadingName: 'Ritus Pembukaan' },
-    { title: selectedMisa, subtitle: 'Tuhan Kasihanilah Kami', fileName: '02-Tuhan_Kasihanilah_Kami', loadingName: 'Tuhan Kasihanilah Kami' },
-    { title: selectedMisa, subtitle: 'Kemuliaan', fileName: '03-Kemuliaan', loadingName: 'Kemuliaan' },
-    { title: selectedMisa, subtitle: 'Doa Kolekta', fileName: '04-Doa_Kolekta', loadingName: 'Doa Kolekta' },
-    { title: 'Bacaan I', subtitle: bacaan1, fileName: '5-Bacaan_I', loadingName: 'Bacaan I' },
-    { title: 'Mazmur Tanggapan', subtitle: mazmur, fileName: '6-Mazmur_Tanggapan', loadingName: 'Mazmur Tanggapan' },
-    { title: 'Bacaan II', subtitle: bacaan2, fileName: '7-Bacaan_II', loadingName: 'Bacaan II' },
-    { title: selectedMisa, subtitle: 'Bait Pengantar Injil', fileName: '08-Bait_Pengantar_Injil', loadingName: 'Bait Pengantar Injil' },
-    { title: 'Bacaan Injil', subtitle: bacaanInjil, fileName: '9-Bacaan_Injil', loadingName: 'Bacaan Injil' },
-    { title: 'Homili', subtitle: selectedHomili ? selectedHomili.toUpperCase() : 'HOMILI', fileName: '10-Homili', loadingName: 'Homili' },
-    { title: selectedMisa, subtitle: 'Aku Percaya', fileName: '11-Aku_Percaya', loadingName: 'Aku Percaya' },
-    { title: selectedMisa, subtitle: 'Doa Umat', fileName: '12-Doa_Umat', loadingName: 'Doa Umat' },
-    { title: selectedMisa, subtitle: 'Persembahan', fileName: '13-Persembahan', loadingName: 'Persembahan' },
-    { title: selectedMisa, subtitle: 'Doa Syukur Agung', fileName: '14-Doa_Syukur_Agung', loadingName: 'Doa Syukur Agung' },
-    { title: selectedMisa, subtitle: 'Bapa Kami', fileName: '15-Bapa_Kami', loadingName: 'Bapa Kami' },
-    { title: selectedMisa, subtitle: 'Doa Damai', fileName: '16-Doa_Damai', loadingName: 'Doa Damai' },
-    { title: selectedMisa, subtitle: 'Anak Domba Allah', fileName: '17-Anak_Domba_Allah', loadingName: 'Anak Domba Allah' },
-    { title: selectedMisa, subtitle: 'Komuni', fileName: '18-Komuni', loadingName: 'Komuni' },
-    { title: selectedMisa, subtitle: 'Doa Penutup', fileName: '19-Doa_Penutup', loadingName: 'Doa Penutup' },
-    { title: selectedMisa, subtitle: 'Pengumuman', fileName: '20-Pengumuman', loadingName: 'Pengumuman' },
-    { title: selectedMisa, subtitle: 'Berkat Penutup', fileName: '21-Berkat_Penutup', loadingName: 'Berkat Penutup' },
-  ], [selectedMisa, bacaan1, mazmur, bacaan2, bacaanInjil, selectedHomili]);
+  const slides = useMemo(() => {
+    const baseSlides = [
+      { title: selectedMisa, subtitle: 'Ritus Pembukaan', fileName: '01-Ritus_Pembukaan', loadingName: 'Ritus Pembukaan' },
+      { title: selectedMisa, subtitle: 'Tuhan Kasihanilah Kami', fileName: '02-Tuhan_Kasihanilah_Kami', loadingName: 'Tuhan Kasihanilah Kami' },
+      { title: selectedMisa, subtitle: 'Kemuliaan', fileName: '03-Kemuliaan', loadingName: 'Kemuliaan' },
+      { title: selectedMisa, subtitle: 'Doa Kolekta', fileName: '04-Doa_Kolekta', loadingName: 'Doa Kolekta' },
+      { title: 'Bacaan I', subtitle: bacaan1, fileName: '5-Bacaan_I', loadingName: 'Bacaan I' },
+      { title: 'Mazmur Tanggapan', subtitle: mazmur, fileName: '6-Mazmur_Tanggapan', loadingName: 'Mazmur Tanggapan' },
+      { title: 'Bacaan II', subtitle: bacaan2, fileName: '7-Bacaan_II', loadingName: 'Bacaan II' },
+      { title: selectedMisa, subtitle: 'Bait Pengantar Injil', fileName: '08-Bait_Pengantar_Injil', loadingName: 'Bait Pengantar Injil' },
+      { title: 'Bacaan Injil', subtitle: bacaanInjil, fileName: '9-Bacaan_Injil', loadingName: 'Bacaan Injil' },
+      { title: 'Homili', subtitle: selectedHomili ? selectedHomili.toUpperCase() : 'HOMILI', fileName: '10-Homili', loadingName: 'Homili' },
+      { title: selectedMisa, subtitle: 'Aku Percaya', fileName: '11-Aku_Percaya', loadingName: 'Aku Percaya' },
+      { title: selectedMisa, subtitle: 'Doa Umat', fileName: '12-Doa_Umat', loadingName: 'Doa Umat' },
+      { title: selectedMisa, subtitle: 'Persembahan', fileName: '13-Persembahan', loadingName: 'Persembahan' },
+      { title: selectedMisa, subtitle: 'Doa Syukur Agung', fileName: '14-Doa_Syukur_Agung', loadingName: 'Doa Syukur Agung' },
+      { title: selectedMisa, subtitle: 'Bapa Kami', fileName: '15-Bapa_Kami', loadingName: 'Bapa Kami' },
+      { title: selectedMisa, subtitle: 'Doa Damai', fileName: '16-Doa_Damai', loadingName: 'Doa Damai' },
+      { title: selectedMisa, subtitle: 'Anak Domba Allah', fileName: '17-Anak_Domba_Allah', loadingName: 'Anak Domba Allah' },
+      { title: selectedMisa, subtitle: 'Komuni', fileName: '18-Komuni', loadingName: 'Komuni' },
+      { title: selectedMisa, subtitle: 'Doa Penutup', fileName: '19-Doa_Penutup', loadingName: 'Doa Penutup' },
+      { title: selectedMisa, subtitle: 'Pengumuman', fileName: '20-Pengumuman', loadingName: 'Pengumuman' },
+      { title: selectedMisa, subtitle: 'Berkat Penutup', fileName: '21-Berkat_Penutup', loadingName: 'Berkat Penutup' },
+    ];
+
+    // Additional Homilies
+    const extraHomilies = [
+      { name: 'Rd Sesarius Petrus Mau', fileNum: '22' },
+      { name: 'Rd Jameslim Damanik', fileNum: '23' },
+      { name: 'Rd Josep Gultom', fileNum: '24' },
+    ];
+
+    extraHomilies.forEach(h => {
+      baseSlides.push({
+        title: 'Homili',
+        subtitle: h.name.toUpperCase(),
+        fileName: `${h.fileNum}-Homili_${h.name.replace(/\s+/g, '_')}`,
+        loadingName: `Homili ${h.name}`
+      });
+    });
+
+    return baseSlides;
+  }, [selectedMisa, bacaan1, mazmur, bacaan2, bacaanInjil, selectedHomili]);
 
   const bannerImage = useMemo(() => {
     if (!selectedMisa) return '';
@@ -452,9 +483,90 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
     }
   };
 
+  const formatMazmur = (text: string) => {
+    const titleCase = (str: string) => {
+      return str.toLowerCase().replace(/(^|[^a-zA-Z0-9])([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase());
+    };
+
+    const capitalizedText = titleCase(text);
+    
+    const originalLines = capitalizedText.split('\n');
+    let finalLines: string[] = [];
+
+    originalLines.forEach(line => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return;
+
+      if (trimmedLine.length <= 45) {
+        finalLines.push(trimmedLine);
+      } else {
+        const words = trimmedLine.split(' ');
+        let currentLine = '';
+        let wrappedLines: string[] = [];
+
+        words.forEach(word => {
+          if ((currentLine + (currentLine ? ' ' : '') + word).length <= 45) {
+            currentLine += (currentLine ? ' ' : '') + word;
+          } else {
+            if (currentLine) wrappedLines.push(currentLine);
+            currentLine = word;
+          }
+        });
+        if (currentLine) wrappedLines.push(currentLine);
+
+        if (wrappedLines.length === 2) {
+          const l1Words = wrappedLines[0].split(' ');
+          const l2Words = wrappedLines[1].split(' ');
+          if (l2Words.length <= 2 && l1Words.length > 2) {
+            const allWords = [...l1Words, ...l2Words];
+            const mid = Math.ceil(allWords.length / 2);
+            wrappedLines[0] = allWords.slice(0, mid).join(' ');
+            wrappedLines[1] = allWords.slice(mid).join(' ');
+          }
+        }
+        finalLines.push(...wrappedLines);
+      }
+    });
+
+    return finalLines.join('\n');
+  };
+
   const handleDownload = async () => {
     if (!previewRef.current || !selectedMisa) return;
+
+    // Create a simple hash of current input data to detect changes
+    const currentDataHash = JSON.stringify({
+      selectedMasa, selectedMisa, bacaan1, mazmur, bacaan2, bacaanInjil, selectedHomili
+    });
+
+    // CACHE CHECK: If data hasn't changed, download the cached blob immediately
+    if (lastGeneratedZip && lastGeneratedZip.dataHash === currentDataHash) {
+      console.log('Using cached ZIP file...');
+      const { blob, fileName } = lastGeneratedZip;
+      
+      if (Capacitor.isNativePlatform()) {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          const base64Data = (reader.result as string).split(',')[1];
+          const savedFile = await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Documents,
+          });
+          await Share.share({ title: 'Alur Misa', url: savedFile.uri, dialogTitle: 'Simpan Alur Misa' });
+        };
+      } else {
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+      }
+      return; // Exit early
+    }
+
     setIsDownloading(true);
+    setGeneratedImage(null); // Clear previous preview
     
     const zip = new JSZip();
 
@@ -464,11 +576,11 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
       for (let i = 0; i < slides.length; i++) {
         const slide = slides[i];
         
-        // Casing logic: Mazmur is Title Case, others are UPPERCASE
+        // Casing logic: Mazmur is Title Case with custom wrapping, others are UPPERCASE
         const isMazmur = slide.title.toUpperCase().includes('MAZMUR');
         const formattedTitle = slide.title.toUpperCase();
         const formattedSubtitle = isMazmur 
-          ? slide.subtitle.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+          ? formatMazmur(slide.subtitle)
           : slide.subtitle.toUpperCase();
 
         setDownloadStep({ current: i + 1, total: slides.length, name: formattedSubtitle });
@@ -492,12 +604,40 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
         });
 
         setGeneratedImage(dataUrl);
+        
         const base64Data = dataUrl.split(',')[1];
         zip.file(`${slide.fileName}.png`, base64Data, { base64: true });
       }
 
       const content = await zip.generateAsync({ type: 'blob' });
       const zipFileName = `AlurMisa-${selectedMisa.replace(/\s+/g, '_')}.zip`;
+
+      // Update Cache for future use
+      setLastGeneratedZip({
+        blob: content,
+        fileName: zipFileName,
+        dataHash: JSON.stringify({
+          selectedMasa, selectedMisa, bacaan1, mazmur, bacaan2, bacaanInjil, selectedHomili
+        })
+      });
+
+      // Save to History Database
+      const historyItem: AlurDownloadHistory = {
+        id: editingHistoryId || Math.random().toString(36).substr(2, 9),
+        fileName: zipFileName,
+        timestamp: null, // Will be set by serverTimestamp in dbService
+        data: {
+          selectedMasa,
+          selectedMisa,
+          bacaan1,
+          mazmur,
+          bacaan2,
+          bacaanInjil,
+          selectedHomili
+        }
+      };
+      await dbService.saveAlurHistory(historyItem);
+      setEditingHistoryId(null);
 
       if (Capacitor.isNativePlatform()) {
         const reader = new FileReader();
@@ -527,8 +667,6 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
         
         // Clear data after download
         clearForm();
-        // Refresh page after download
-        setTimeout(() => window.location.reload(), 1500);
       }
     } catch (err) {
       console.error('Download error:', err);
@@ -537,6 +675,7 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
       setIsDownloading(false);
       setDownloadStep(null);
       setDownloadPreview(null);
+      setGeneratedImage(null); // Clear image from memory
     }
   };
 
@@ -548,6 +687,58 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
     setBacaan2('');
     setBacaanInjil('');
     setSelectedHomili('');
+  };
+
+  const handleEditHistory = (history: AlurDownloadHistory) => {
+    setEditingHistoryId(history.id);
+    setSelectedMasa(history.data.selectedMasa);
+    setSelectedMisa(history.data.selectedMisa);
+    setBacaan1(history.data.bacaan1);
+    setMazmur(history.data.mazmur);
+    setBacaan2(history.data.bacaan2);
+    setBacaanInjil(history.data.bacaanInjil);
+    setSelectedHomili(history.data.selectedHomili);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteHistory = async (id: string) => {
+    try {
+      await dbService.deleteAlurHistory(id);
+    } catch (error) {
+      console.error('Failed to delete history:', error);
+    }
+  };
+
+  const handleDeleteAllHistory = async () => {
+    if (window.confirm('Hapus semua riwayat download?')) {
+      try {
+        await dbService.deleteAllAlurHistory();
+      } catch (error) {
+        console.error('Failed to delete all history:', error);
+      }
+    }
+  };
+
+  const handleRedownload = async (history: AlurDownloadHistory) => {
+    // Fill form and trigger download
+    setSelectedMasa(history.data.selectedMasa);
+    setSelectedMisa(history.data.selectedMisa);
+    setBacaan1(history.data.bacaan1);
+    setMazmur(history.data.mazmur);
+    setBacaan2(history.data.bacaan2);
+    setBacaanInjil(history.data.bacaanInjil);
+    setSelectedHomili(history.data.selectedHomili);
+    
+    // Use setTimeout to ensure state is updated before handleDownload
+    setTimeout(() => {
+      handleDownload();
+    }, 100);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingHistoryId(null);
+    clearForm();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -895,7 +1086,7 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
                       style={{ 
                         color: subBarTextColor,
                         fontSize: downloadPreview.title.includes('MAZMUR') 
-                          ? (downloadPreview.subtitle.length > 50 || downloadPreview.subtitle.includes('\n') ? '32px' : '48px') 
+                          ? (downloadPreview.subtitle.length > 45 || downloadPreview.subtitle.includes('\n') ? '32px' : '48px') 
                           : '48px'
                       }}
                     >
@@ -911,13 +1102,22 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
 
       {selectedMasa && selectedMisa && (
         <div className="mt-8 flex flex-col items-center gap-4">
+          {editingHistoryId && (
+            <button
+              onClick={handleCancelEdit}
+              className="w-full bg-amber-50 text-amber-700 py-3 rounded-2xl font-bold text-sm border border-amber-200 hover:bg-amber-100 transition-all flex items-center justify-center gap-2"
+            >
+              <X size={18} />
+              Batal Edit Alur Misa
+            </button>
+          )}
           <button
             onClick={handleDownload}
             disabled={isDownloading}
             className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-indigo-200 hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70"
           >
             <Download size={24} />
-            Download Alur Misa (ZIP)
+            {editingHistoryId ? 'Update & Download Alur Misa' : 'Download Alur Misa (ZIP)'}
           </button>
 
           {/* Real-time Preview during Download - Show below button when downloading */}
@@ -931,6 +1131,89 @@ const AlurManager: React.FC<AlurManagerProps> = ({ canAddHomili, canEditHomili, 
           )}
         </div>
       )}
+
+      {/* Download History Panel */}
+      <div className="mt-12 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-6 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600">
+              <History size={20} />
+            </div>
+            <h3 className="text-xl font-black text-gray-800 tracking-tight">Riwayat Download</h3>
+          </div>
+          {downloadHistory.length > 0 && (
+            <button 
+              onClick={handleDeleteAllHistory}
+              className="flex items-center gap-2 text-red-500 hover:text-red-700 font-bold text-sm transition-colors p-2 hover:bg-red-50 rounded-lg"
+              title="Hapus Semua Riwayat"
+            >
+              <Trash size={18} />
+              Hapus Semua
+            </button>
+          )}
+        </div>
+
+        <div className="divide-y divide-gray-50">
+          {downloadHistory.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-50 text-gray-300 mb-4">
+                <History size={32} />
+              </div>
+              <p className="text-gray-400 font-bold">Belum ada riwayat download</p>
+            </div>
+          ) : (
+            downloadHistory.map((history) => (
+              <div key={history.id} className="p-5 hover:bg-gray-50/50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-gray-800">{history.fileName}</span>
+                    {editingHistoryId === history.id && (
+                      <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Sedang Diedit</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-gray-400 font-bold">
+                    <span className="flex items-center gap-1">
+                      {history.timestamp?.seconds ? new Date(history.timestamp.seconds * 1000).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      }) : 'Menyimpan...'}
+                    </span>
+                    <span className="text-gray-200">|</span>
+                    <span className="text-indigo-400">{history.data.selectedMisa}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleRedownload(history)}
+                    className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-all shadow-sm shadow-indigo-100/50"
+                    title="Download Ulang"
+                  >
+                    <Download size={18} />
+                  </button>
+                  <button
+                    onClick={() => handleEditHistory(history)}
+                    className="p-3 bg-amber-50 text-amber-600 rounded-xl hover:bg-amber-100 transition-all shadow-sm shadow-amber-100/50"
+                    title="Edit Data"
+                  >
+                    <Edit2 size={18} />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteHistory(history.id)}
+                    className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all shadow-sm shadow-red-100/50"
+                    title="Hapus"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 };
